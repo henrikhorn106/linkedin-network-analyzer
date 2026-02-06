@@ -6,6 +6,7 @@ export function AddContactModal({ onAdd, onClose, companies, editContact = null 
   const [company, setCompany] = useState(editContact?.company || "");
   const [position, setPosition] = useState(editContact?.position || "");
   const [connectedOn, setConnectedOn] = useState(editContact?.connectedOn || "");
+  const [linkedinUrl, setLinkedinUrl] = useState(editContact?.linkedinUrl || "");
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
 
   const filteredCompanies = useMemo(() => {
@@ -26,6 +27,7 @@ export function AddContactModal({ onAdd, onClose, companies, editContact = null 
       connectedOn: connectedOn.trim() || new Date().toLocaleDateString('de-DE', {
         day: '2-digit', month: 'short', year: 'numeric'
       }),
+      linkedinUrl: linkedinUrl.trim() || null,
     });
     onClose();
   };
@@ -142,7 +144,7 @@ export function AddContactModal({ onAdd, onClose, companies, editContact = null 
             />
           </div>
 
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 10, color: P.textDim, marginBottom: 6, letterSpacing: "0.5px" }}>
               VERBUNDEN AM
             </label>
@@ -151,6 +153,24 @@ export function AddContactModal({ onAdd, onClose, companies, editContact = null 
               value={connectedOn}
               onChange={e => setConnectedOn(e.target.value)}
               placeholder="z.B. 15 Jan 2024"
+              style={{
+                width: "100%", padding: "10px 12px", background: P.bg,
+                border: `1px solid ${P.border}`, borderRadius: 6,
+                color: P.text, fontSize: 12, fontFamily: "inherit",
+                outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 10, color: P.textDim, marginBottom: 6, letterSpacing: "0.5px" }}>
+              LINKEDIN URL
+            </label>
+            <input
+              type="url"
+              value={linkedinUrl}
+              onChange={e => setLinkedinUrl(e.target.value)}
+              placeholder="https://linkedin.com/in/..."
               style={{
                 width: "100%", padding: "10px 12px", background: P.bg,
                 border: `1px solid ${P.border}`, borderRadius: 6,

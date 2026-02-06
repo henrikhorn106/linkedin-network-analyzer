@@ -137,7 +137,8 @@ export function TopBar({
                             setSelectedContact(null);
                           } else {
                             setSelectedContact(c);
-                            setSelectedCompany(null);
+                            const co = network.companyNodes.find(n => n.name === c.company);
+                            setSelectedCompany(co || null);
                           }
                           setSearchTerm("");
                           onFocusNode(c.id);
