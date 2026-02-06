@@ -13,6 +13,9 @@ export function TopBar({
   showCompanyLinks,
   setShowCompanyLinks,
   allCompanyLinksCount,
+  industryFilter,
+  setIndustryFilter,
+  availableIndustries,
   searchTerm,
   setSearchTerm,
   searchResults,
@@ -264,6 +267,9 @@ export function TopBar({
             showCompanyLinks={showCompanyLinks}
             setShowCompanyLinks={setShowCompanyLinks}
             companyLinkCount={allCompanyLinksCount}
+            industryFilter={industryFilter}
+            setIndustryFilter={setIndustryFilter}
+            availableIndustries={availableIndustries}
           />
         </div>
       )}

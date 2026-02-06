@@ -165,6 +165,7 @@ export default function App() {
   const [showAIChat, setShowAIChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [focusNode, setFocusNode] = useState(null);
+  const [industryFilter, setIndustryFilter] = useState("all");
 
   // Auto-adjust filters for large networks
   useEffect(() => {
@@ -192,8 +193,8 @@ export default function App() {
 
   // Build network (pass user's company to always show it centered)
   const network = useMemo(() =>
-    buildNetwork(filteredContacts, minCompanySize, company?.name),
-    [filteredContacts, minCompanySize, company?.name]
+    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter),
+    [filteredContacts, minCompanySize, company?.name, industryFilter]
   );
 
   // Top influencers
@@ -359,6 +360,9 @@ export default function App() {
         showCompanyLinks={showCompanyLinks}
         setShowCompanyLinks={setShowCompanyLinks}
         allCompanyLinksCount={allCompanyLinks.length}
+        industryFilter={industryFilter}
+        setIndustryFilter={setIndustryFilter}
+        availableIndustries={network.allIndustries || []}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         searchResults={searchResults}

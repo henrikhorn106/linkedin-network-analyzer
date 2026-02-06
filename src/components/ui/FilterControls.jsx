@@ -9,7 +9,10 @@ export function FilterControls({
   filteredContacts,
   showCompanyLinks,
   setShowCompanyLinks,
-  companyLinkCount
+  companyLinkCount,
+  industryFilter,
+  setIndustryFilter,
+  availableIndustries,
 }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
@@ -58,6 +61,30 @@ export function FilterControls({
           <option value={8}>8+ (C-Level)</option>
         </select>
       </div>
+
+      {availableIndustries && availableIndustries.length > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 9, color: P.textDim }}>Branche:</span>
+          <select
+            value={industryFilter}
+            onChange={(e) => setIndustryFilter(e.target.value)}
+            style={{
+              background: P.bg,
+              border: `1px solid ${P.border}`,
+              borderRadius: 4,
+              padding: "3px 6px",
+              color: P.text,
+              fontSize: 10,
+              fontFamily: "inherit",
+            }}
+          >
+            <option value="all">Alle</option>
+            {availableIndustries.map(ind => (
+              <option key={ind} value={ind}>{ind}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <button
         onClick={() => setShowCompanyLinks(!showCompanyLinks)}

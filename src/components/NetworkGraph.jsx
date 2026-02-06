@@ -106,13 +106,25 @@ export function NetworkGraph({
     gRef.current = g;
     let currentZoomScale = 1;
     let _linkGroup = null, _link = null;
+    let _contactGroup = null, _cN = null;
     let linkThreshold = 1.0;
+    let contactThreshold = 0.6;
     const zoom = d3.zoom().scaleExtent([0.1, 4]).on("zoom", e => {
       g.attr("transform", e.transform);
       const prevScale = currentZoomScale;
       currentZoomScale = e.transform.k;
       // Only update effects when scale actually changes
       if (prevScale !== currentZoomScale) {
+        // Toggle contact dots based on zoom level
+        if (_contactGroup) {
+          if (currentZoomScale >= contactThreshold && prevScale < contactThreshold) {
+            // Sync positions before showing (they may have drifted while hidden)
+            _cN.attr("cx", d => d.x).attr("cy", d => d.y);
+            _contactGroup.attr("display", null);
+          } else if (currentZoomScale < contactThreshold && prevScale >= contactThreshold) {
+            _contactGroup.attr("display", "none");
+          }
+        }
         // Toggle contact-to-company links based on zoom level
         if (_linkGroup) {
           if (currentZoomScale >= linkThreshold && prevScale < linkThreshold) {
@@ -156,6 +168,7 @@ export function NetworkGraph({
     // Performance: adjust for large networks
     const isLargeNetwork = nodes.length > 200;
     linkThreshold = isLargeNetwork ? 1.2 : 0.6;
+    contactThreshold = isLargeNetwork ? 0.45 : 0.25;
 
     // Compute radius scaling from actual company data
     const companyDataNodes = nodes.filter(n => n.type === "company" && !n.isUserCompany);
@@ -394,7 +407,12 @@ export function NetworkGraph({
     // Contact dots (exclude user node, rendered above)
     const contactRadius = (d) => isLargeNetwork ? 1.5 + (d.normalizedInfluence || 0) * 4 : 2.5 + (d.normalizedInfluence || 0) * 7;
 
-    const cN = g.append("g").selectAll("circle").data(nodes.filter(n => n.type === "contact" && !n.isUser)).join("circle")
+    const contactGroup = g.append("g");
+    // Start hidden — contacts appear when zoomed in past contactThreshold
+    contactGroup.attr("display", "none");
+    _contactGroup = contactGroup;
+
+    const cN = contactGroup.selectAll("circle").data(nodes.filter(n => n.type === "contact" && !n.isUser)).join("circle")
       .attr("r", contactRadius)
       .attr("fill", d => (companyColors[`company_${d.company}`] || P.textMuted) + "CC")
       .attr("stroke", d => d.seniority >= 8 ? P.gold + "BB" : "transparent")
@@ -423,6 +441,7 @@ export function NetworkGraph({
       .on("click", (_, d) => { setSelectedContact(d); })
       .call(drag);
     contactDotsRef.current = cN;
+    _cN = cN;
 
     // Node lookup for company links
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
@@ -455,7 +474,10 @@ export function NetworkGraph({
       });
 
       cG.attr("transform", d => `translate(${d.x},${d.y})`);
-      cN.attr("cx", d => d.x).attr("cy", d => d.y);
+      // Only update contact dot positions when they're visible
+      if (currentZoomScale >= contactThreshold) {
+        cN.attr("cx", d => d.x).attr("cy", d => d.y);
+      }
     });
 
     // Initial zoom
