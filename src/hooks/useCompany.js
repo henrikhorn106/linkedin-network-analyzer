@@ -65,6 +65,72 @@ export function useCompany(userId) {
     setCompany(null);
   }, [company]);
 
+  // Get enrichment data for any company by name
+  const getCompanyEnrichment = useCallback((companyName) => {
+    if (!isInitialized || !userId) return null;
+    try {
+      const rows = query(
+        'SELECT * FROM companies WHERE user_id = ? AND name = ? LIMIT 1',
+        [userId, companyName]
+      );
+      return rows[0] || null;
+    } catch (err) {
+      console.error('Failed to get company enrichment:', err);
+      return null;
+    }
+  }, [isInitialized, userId]);
+
+  // Save enrichment data for any company (upsert)
+  const saveCompanyEnrichment = useCallback(async (companyName, enrichmentData) => {
+    if (!userId) return null;
+
+    const existing = getCompanyEnrichment(companyName);
+    const now = new Date().toISOString();
+
+    if (existing) {
+      await execute(
+        `UPDATE companies SET
+          description = ?, website = ?, headquarters = ?, founded_year = ?,
+          company_type = ?, linkedin_url = ?, enriched_at = ?,
+          industry = COALESCE(?, industry),
+          estimated_size = COALESCE(?, estimated_size)
+        WHERE id = ?`,
+        [
+          enrichmentData.description || null,
+          enrichmentData.website || null,
+          enrichmentData.headquarters || null,
+          enrichmentData.founded_year || null,
+          enrichmentData.company_type || null,
+          enrichmentData.linkedin_url || null,
+          now,
+          enrichmentData.industry || null,
+          enrichmentData.estimated_size || null,
+          existing.id,
+        ]
+      );
+      return { ...existing, ...enrichmentData, enriched_at: now };
+    } else {
+      await execute(
+        `INSERT INTO companies (user_id, name, description, website, headquarters, founded_year, company_type, linkedin_url, enriched_at, industry, estimated_size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          companyName,
+          enrichmentData.description || null,
+          enrichmentData.website || null,
+          enrichmentData.headquarters || null,
+          enrichmentData.founded_year || null,
+          enrichmentData.company_type || null,
+          enrichmentData.linkedin_url || null,
+          now,
+          enrichmentData.industry || null,
+          enrichmentData.estimated_size || null,
+        ]
+      );
+      return { name: companyName, ...enrichmentData, enriched_at: now };
+    }
+  }, [userId, getCompanyEnrichment]);
+
   return {
     company,
     isLoading,
@@ -72,5 +138,7 @@ export function useCompany(userId) {
     updateCompany,
     deleteCompany,
     reloadCompany: loadCompany,
+    getCompanyEnrichment,
+    saveCompanyEnrichment,
   };
 }

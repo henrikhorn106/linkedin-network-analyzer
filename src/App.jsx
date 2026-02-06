@@ -128,7 +128,7 @@ export default function App() {
 
   // User & Company hooks
   const { user, isLoading: userLoading, deleteUser } = useUser();
-  const { company, updateCompany, deleteCompany } = useCompany(user?.id);
+  const { company, updateCompany, deleteCompany, getCompanyEnrichment, saveCompanyEnrichment } = useCompany(user?.id);
 
   // Contacts hook with userId
   const {
@@ -453,6 +453,9 @@ export default function App() {
             onEditContact={setEditingContact}
             onDeleteContact={deleteContact}
             onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
+            contacts={contacts}
+            getCompanyEnrichment={getCompanyEnrichment}
+            saveCompanyEnrichment={saveCompanyEnrichment}
           />
       </div>
 

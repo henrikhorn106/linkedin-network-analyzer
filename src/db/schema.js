@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- User's own company
+-- Companies (user's own + enriched external)
 CREATE TABLE IF NOT EXISTS companies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -18,6 +18,13 @@ CREATE TABLE IF NOT EXISTS companies (
   estimated_size INTEGER,
   industry TEXT,
   color TEXT,
+  description TEXT,
+  website TEXT,
+  headquarters TEXT,
+  founded_year INTEGER,
+  company_type TEXT,
+  linkedin_url TEXT,
+  enriched_at TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

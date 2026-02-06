@@ -141,7 +141,7 @@ export function useContacts(userId) {
     }
   }, [userId, contacts]);
 
-  // Bulk add contacts (e.g., from CSV import)
+  // Bulk add contacts with name+company dedup (e.g., from CSV import)
   const addContacts = useCallback(async (newContacts) => {
     if (!userId || !newContacts.length) return;
 
@@ -149,77 +149,88 @@ export function useContacts(userId) {
       const db = getDatabase();
       db.run('BEGIN TRANSACTION');
 
+      // Load existing contacts for dedup by name+company (case-insensitive)
+      const existingRows = query('SELECT id, external_id, name, company FROM contacts WHERE user_id = ?', [userId]);
+      const existingMap = new Map();
+      existingRows.forEach(row => {
+        const key = `${row.name.toLowerCase()}||${(row.company || '').toLowerCase()}`;
+        existingMap.set(key, row);
+      });
+
       const addedContacts = [];
 
       for (const contact of newContacts) {
         const externalId = contact.id || `contact_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const dedupKey = `${contact.name.toLowerCase()}||${(contact.company || '').toLowerCase()}`;
+        const existing = existingMap.get(dedupKey);
 
-        try {
+        if (existing) {
+          // Update existing contact with newer data (position, linkedinUrl, etc.)
           db.run(
-            `INSERT INTO contacts (user_id, external_id, name, company, position, connected_on, is_company_placeholder, custom_estimated_size, linkedin_url)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `UPDATE contacts SET position = COALESCE(?, position), connected_on = COALESCE(?, connected_on), linkedin_url = COALESCE(?, linkedin_url)
+             WHERE id = ?`,
             [
-              userId,
-              externalId,
-              contact.name,
-              contact.company || null,
               contact.position || null,
               contact.connectedOn || null,
-              contact.isCompanyPlaceholder ? 1 : 0,
-              contact.customEstimatedSize || null,
               contact.linkedinUrl || null,
+              existing.id,
             ]
           );
+        } else {
+          try {
+            db.run(
+              `INSERT INTO contacts (user_id, external_id, name, company, position, connected_on, is_company_placeholder, custom_estimated_size, linkedin_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                userId,
+                externalId,
+                contact.name,
+                contact.company || null,
+                contact.position || null,
+                contact.connectedOn || null,
+                contact.isCompanyPlaceholder ? 1 : 0,
+                contact.customEstimatedSize || null,
+                contact.linkedinUrl || null,
+              ]
+            );
 
-          const result = db.exec('SELECT last_insert_rowid() as id');
-          const dbId = result[0]?.values[0]?.[0];
-
-          addedContacts.push({
-            ...contact,
-            id: externalId,
-            dbId,
-          });
-        } catch (err) {
-          // Skip duplicates
-          if (!err.message?.includes('UNIQUE constraint failed')) {
-            throw err;
+            addedContacts.push({
+              ...contact,
+              id: externalId,
+            });
+            // Track for dedup within same batch
+            existingMap.set(dedupKey, { id: 0, name: contact.name, company: contact.company });
+          } catch (err) {
+            if (!err.message?.includes('UNIQUE constraint failed')) {
+              throw err;
+            }
           }
         }
       }
 
       db.run('COMMIT');
-
-      // Persist to IndexedDB
       await persistDatabase();
 
-      setContacts(prev => [...addedContacts, ...prev]);
+      // Reload all contacts from DB to get clean state
+      loadContacts();
     } catch (err) {
       console.error('Failed to bulk add contacts:', err);
       const db = getDatabase();
       db.run('ROLLBACK');
       throw err;
     }
-  }, [userId]);
+  }, [userId, loadContacts]);
 
-  // Replace all contacts (preserves user's own contact)
+  // Import contacts from CSV (upserts, preserves manual contacts)
   const setAllContacts = useCallback(async (newContacts) => {
     if (!userId) return;
 
     try {
-      // Clear existing contacts but keep the user's own contact
-      await execute(
-        "DELETE FROM contacts WHERE user_id = ? AND (external_id IS NULL OR external_id NOT LIKE 'user_%')",
-        [userId]
-      );
-
-      // Add all new contacts
       if (newContacts.length > 0) {
         await addContacts(newContacts);
-      } else {
-        setContacts([]);
       }
     } catch (err) {
-      console.error('Failed to replace contacts:', err);
+      console.error('Failed to import contacts:', err);
       throw err;
     }
   }, [userId, addContacts]);

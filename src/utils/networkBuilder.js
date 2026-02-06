@@ -102,10 +102,14 @@ export function calculateSeniority(position) {
  * @param {Array} companyRelationships - Company-to-company relationships [{source, target, type}]
  */
 export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = []) {
-  // Group contacts by company
+  // Group contacts by company (case-insensitive, preserving first-seen casing)
   const companyMap = {};
+  const companyCanonical = {}; // lowercase -> first-seen casing
   contacts.forEach(c => {
-    const co = c.company?.trim() || "Unknown";
+    const raw = c.company?.trim() || "Unknown";
+    const key = raw.toLowerCase();
+    if (!companyCanonical[key]) companyCanonical[key] = raw;
+    const co = companyCanonical[key];
     if (!companyMap[co]) companyMap[co] = [];
     companyMap[co].push(c);
   });

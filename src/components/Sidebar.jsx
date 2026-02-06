@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { P } from '../styles/theme';
 import { RELATIONSHIP_TYPES } from '../data/constants';
 import { calculateSeniority } from '../utils/networkBuilder';
+import { enrichCompanyWithAI } from '../utils/aiExtractor';
 
 const COLOR_PRESETS = [
   "#00E5A0", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6",
@@ -40,6 +41,9 @@ export function Sidebar({
   onEditContact,
   onDeleteContact,
   onFocusNode,
+  contacts,
+  getCompanyEnrichment,
+  saveCompanyEnrichment,
 }) {
   // Format large numbers
   const formatSize = (n) => {
@@ -54,6 +58,44 @@ export function Sidebar({
   const [editSize, setEditSize] = useState('');
   const [editIndustry, setEditIndustry] = useState('');
   const [editColor, setEditColor] = useState('');
+
+  // Enrichment state
+  const [enrichment, setEnrichment] = useState(null);
+  const [isEnriching, setIsEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState(null);
+
+  // Load enrichment when company changes
+  useEffect(() => {
+    if (selectedCompany && getCompanyEnrichment) {
+      const data = getCompanyEnrichment(selectedCompany.name);
+      setEnrichment(data);
+    } else {
+      setEnrichment(null);
+    }
+    setEnrichError(null);
+  }, [selectedCompany?.name, getCompanyEnrichment]);
+
+  const handleEnrich = async () => {
+    if (!selectedCompany) return;
+    const apiKey = localStorage.getItem('openai_api_key');
+    if (!apiKey) {
+      setEnrichError('Kein OpenAI API-Key gespeichert. Bitte im AI-Chat konfigurieren.');
+      return;
+    }
+    setIsEnriching(true);
+    setEnrichError(null);
+    try {
+      const companyContacts = (contacts || []).filter(c => c.company === selectedCompany.name);
+      const result = await enrichCompanyWithAI(selectedCompany.name, companyContacts, apiKey);
+      const saved = await saveCompanyEnrichment(selectedCompany.name, result);
+      setEnrichment(saved);
+    } catch (err) {
+      console.error('Enrichment failed:', err);
+      setEnrichError('Anreicherung fehlgeschlagen. Bitte versuche es erneut.');
+    } finally {
+      setIsEnriching(false);
+    }
+  };
 
   const isUserCompany = selectedCompany && userCompany && selectedCompany.name === userCompany.name;
 
@@ -272,10 +314,107 @@ export function Sidebar({
                   {selectedCompany.estimatedSize?.toLocaleString('de-DE')} Mitarbeiter
                 </span>
               </div>
-              {isUserCompany && userCompany.industry && (
+              {/* Show industry from enrichment or user company */}
+              {(enrichment?.industry || (isUserCompany && userCompany.industry)) && (
                 <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ color: P.textDim }}>Branche:</span>
-                  <span style={{ color: P.text, fontWeight: 600 }}>{userCompany.industry}</span>
+                  <span style={{ color: P.text, fontWeight: 600 }}>
+                    {enrichment?.industry || userCompany?.industry}
+                  </span>
+                </div>
+              )}
+
+              {/* Enrichment data */}
+              {enrichment?.enriched_at && (
+                <div style={{
+                  marginTop: 10, padding: 10, background: P.bg,
+                  borderRadius: 7, border: `1px solid ${P.border}`,
+                }}>
+                  {enrichment.description && (
+                    <div style={{ fontSize: 10, color: P.text, lineHeight: 1.5, marginBottom: 8 }}>
+                      {enrichment.description}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {enrichment.company_type && (
+                      <span style={{
+                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                        background: P.purple + "15", color: P.purple, fontWeight: 600,
+                      }}>
+                        {enrichment.company_type}
+                      </span>
+                    )}
+                    {enrichment.headquarters && (
+                      <span style={{
+                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                        background: P.blue + "15", color: P.blue, fontWeight: 600,
+                      }}>
+                        📍 {enrichment.headquarters}
+                      </span>
+                    )}
+                    {enrichment.founded_year && (
+                      <span style={{
+                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                        background: P.orange + "15", color: P.orange, fontWeight: 600,
+                      }}>
+                        Gegr. {enrichment.founded_year}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    {enrichment.website && (
+                      <a
+                        href={enrichment.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontSize: 8, color: P.accent, textDecoration: "none", fontWeight: 600,
+                        }}
+                      >
+                        Website ↗
+                      </a>
+                    )}
+                    {enrichment.linkedin_url && (
+                      <a
+                        href={enrichment.linkedin_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontSize: 8, color: "#0A66C2", textDecoration: "none", fontWeight: 600,
+                        }}
+                      >
+                        LinkedIn ↗
+                      </a>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 7, color: P.textDim, marginTop: 6 }}>
+                    Angereichert: {new Date(enrichment.enriched_at).toLocaleDateString('de-DE')}
+                  </div>
+                </div>
+              )}
+
+              {/* Enrich button */}
+              <button
+                onClick={handleEnrich}
+                disabled={isEnriching}
+                style={{
+                  width: "100%", marginTop: 10, padding: "7px 0",
+                  background: isEnriching ? P.border : (enrichment?.enriched_at ? P.bg : P.purple + "15"),
+                  border: `1px solid ${enrichment?.enriched_at ? P.border : P.purple + "40"}`,
+                  borderRadius: 6,
+                  color: isEnriching ? P.textDim : (enrichment?.enriched_at ? P.textMuted : P.purple),
+                  fontSize: 9, fontWeight: 600,
+                  cursor: isEnriching ? "wait" : "pointer",
+                  fontFamily: "inherit",
+                  letterSpacing: "0.5px",
+                  transition: "all 0.15s",
+                }}
+              >
+                {isEnriching ? "WIRD ANGEREICHERT..." : (enrichment?.enriched_at ? "ERNEUT ANREICHERN" : "MIT KI ANREICHERN")}
+              </button>
+              {enrichError && (
+                <div style={{ fontSize: 8, color: P.red, marginTop: 4 }}>
+                  {enrichError}
                 </div>
               )}
             </>

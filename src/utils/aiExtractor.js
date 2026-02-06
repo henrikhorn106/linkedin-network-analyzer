@@ -139,6 +139,65 @@ export function extractWithRules(notes) {
 }
 
 /**
+ * Enrich company data using OpenAI API
+ * Takes company name + known contacts/positions for context
+ */
+export async function enrichCompanyWithAI(companyName, contacts, apiKey) {
+  const contactContext = contacts.length > 0
+    ? `\nBekannte Kontakte bei dieser Firma:\n${contacts.map(c => `- ${c.name}: ${c.position || 'Connection'}`).join('\n')}`
+    : '';
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Du bist ein Business-Research-Assistent. Du erhältst einen Firmennamen und optional bekannte Kontakte.
+Recherchiere basierend auf deinem Wissen über die Firma und antworte NUR mit validem JSON:
+{
+  "description": "Kurze Beschreibung (1-2 Sätze) was die Firma macht",
+  "industry": "Branche (z.B. Technologie, Beratung, Finanzdienstleistungen, Marketing & Werbung, E-Commerce, Gesundheitswesen, Bildung, Produktion, Immobilien)",
+  "website": "https://... (offizielle Website, oder null wenn unbekannt)",
+  "headquarters": "Stadt, Land (Hauptsitz)",
+  "founded_year": 2010,
+  "company_type": "Enterprise/Startup/Mittelstand/Agentur/Beratung/Konzern",
+  "linkedin_url": "https://linkedin.com/company/... (oder null wenn unbekannt)",
+  "estimated_size": 500
+}
+Wenn du dir bei einem Feld nicht sicher bist, setze es auf null.
+Schätze die Firmengröße basierend auf dem Kontext (Startup: 10-50, Mittelstand: 50-500, Enterprise: 500+).
+Antworte NUR mit dem JSON-Objekt, kein zusätzlicher Text.`
+        },
+        {
+          role: 'user',
+          content: `Firma: ${companyName}${contactContext}`
+        }
+      ],
+      temperature: 0.3,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('API request failed');
+  }
+
+  const data = await response.json();
+  const content = data.choices[0]?.message?.content || '{}';
+
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return JSON.parse(jsonMatch[0]);
+  }
+  throw new Error('Could not parse AI response');
+}
+
+/**
  * Extract data from notes - uses AI if API key available, otherwise rules
  */
 export async function extractDataFromNotes(notes, apiKey) {

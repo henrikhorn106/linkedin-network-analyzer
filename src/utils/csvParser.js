@@ -86,8 +86,11 @@ export function parseLinkedInCSV(csvText) {
     const connectedOn = columnMap.connectedOn >= 0 ? values[columnMap.connectedOn]?.trim() || '' : '';
     const linkedinUrl = columnMap.url >= 0 ? values[columnMap.url]?.trim() || '' : '';
 
+    // Stable ID from name so re-uploads match the same contact
+    const stableId = `csv_${name.toLowerCase().replace(/\s+/g, '_')}`;
+
     contacts.push({
-      id: `csv_${i}`,
+      id: stableId,
       name,
       company,
       position,

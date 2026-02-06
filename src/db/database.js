@@ -109,6 +109,19 @@ export async function initDatabase() {
       db.run('ALTER TABLE companies ADD COLUMN color TEXT');
       await persistDatabase();
     }
+    // Migration: add enrichment columns to companies if missing
+    try {
+      db.exec('SELECT description FROM companies LIMIT 0');
+    } catch (e) {
+      db.run('ALTER TABLE companies ADD COLUMN description TEXT');
+      db.run('ALTER TABLE companies ADD COLUMN website TEXT');
+      db.run('ALTER TABLE companies ADD COLUMN headquarters TEXT');
+      db.run('ALTER TABLE companies ADD COLUMN founded_year INTEGER');
+      db.run('ALTER TABLE companies ADD COLUMN company_type TEXT');
+      db.run('ALTER TABLE companies ADD COLUMN linkedin_url TEXT');
+      db.run('ALTER TABLE companies ADD COLUMN enriched_at TEXT');
+      await persistDatabase();
+    }
   } else {
     db = new SQL.Database();
     // Create tables
