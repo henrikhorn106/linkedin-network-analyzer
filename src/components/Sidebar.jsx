@@ -39,6 +39,7 @@ export function Sidebar({
   deleteCompanyContacts,
   onEditContact,
   onDeleteContact,
+  onFocusNode,
 }) {
   // Format large numbers
   const formatSize = (n) => {
@@ -374,13 +375,20 @@ export function Sidebar({
             const companyColor = companyColors[selectedCompany.id] || P.accent;
 
             const renderMember = (m, i, isKey) => (
-              <div key={m.id || i} style={{
+              <div key={m.id || i}
+                onClick={() => { setSelectedContact(m); onFocusNode?.(m.id); }}
+                style={{
                 padding: "10px 11px",
                 background: isKey ? companyColor + "08" : P.bg,
                 borderRadius: 7,
                 marginBottom: 5,
                 border: `1px solid ${isKey ? companyColor + "25" : P.border}`,
-              }}>
+                cursor: "pointer",
+                transition: "transform 0.12s",
+              }}
+                onMouseOver={e => e.currentTarget.style.transform = "translateX(3px)"}
+                onMouseOut={e => e.currentTarget.style.transform = "none"}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
                     {isKey && (
@@ -530,7 +538,12 @@ export function Sidebar({
         {topInfluencers.slice(0, 12).map((c, i) => (
           <div
             key={c.id}
-            onClick={() => { setSelectedContact(c); setSelectedCompany(null); }}
+            onClick={() => {
+              setSelectedContact(c);
+              const co = companyNodes.find(n => n.name === c.company);
+              setSelectedCompany(co || null);
+              onFocusNode?.(c.id);
+            }}
             style={{
               padding: "8px 10px",
               background: i < 3 ? P.goldDim : P.bg,
@@ -583,7 +596,7 @@ export function Sidebar({
         {companyNodes.slice(0, 12).map(c => (
           <div
             key={c.id}
-            onClick={() => { setSelectedCompany(c); setSelectedContact(null); }}
+            onClick={() => { setSelectedCompany(c); setSelectedContact(null); onFocusNode?.(c.id); }}
             style={{
               padding: "8px 10px",
               background: P.bg,

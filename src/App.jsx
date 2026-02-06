@@ -452,6 +452,7 @@ export default function App() {
             deleteCompanyContacts={dbDeleteCompanyContacts}
             onEditContact={setEditingContact}
             onDeleteContact={deleteContact}
+            onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
           />
       </div>
 
