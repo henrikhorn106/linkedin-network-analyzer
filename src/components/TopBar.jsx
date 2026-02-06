@@ -10,9 +10,9 @@ export function TopBar({
   setMinCompanySize,
   seniorityFilter,
   setSeniorityFilter,
-  showCompanyLinks,
-  setShowCompanyLinks,
-  allCompanyLinksCount,
+  companyLinkFilter,
+  setCompanyLinkFilter,
+  allCompanyLinks,
   industryFilter,
   setIndustryFilter,
   availableIndustries,
@@ -264,9 +264,9 @@ export function TopBar({
             setSeniorityFilter={setSeniorityFilter}
             totalContacts={contacts.length}
             filteredContacts={network.filteredContacts}
-            showCompanyLinks={showCompanyLinks}
-            setShowCompanyLinks={setShowCompanyLinks}
-            companyLinkCount={allCompanyLinksCount}
+            companyLinkFilter={companyLinkFilter}
+            setCompanyLinkFilter={setCompanyLinkFilter}
+            allCompanyLinks={allCompanyLinks}
             industryFilter={industryFilter}
             setIndustryFilter={setIndustryFilter}
             availableIndustries={availableIndustries}

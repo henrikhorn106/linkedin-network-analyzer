@@ -1,6 +1,52 @@
 import { estimateCompanySize } from '../data/companySizes';
 import { SENIORITY_KEYWORDS, BUSINESS_ROLES } from '../data/constants';
 
+/**
+ * Calculate a richer influence score for a contact.
+ *
+ * Factors:
+ *  1. Seniority (0-10)       — highest weight, C-level = max influence
+ *  2. Company reach           — log10 of estimated employees (bigger org = wider influence)
+ *  3. Network density         — how many of your contacts are at this company (sqrt, diminishing)
+ *  4. Role relevance          — bonus for business-facing roles (sales, partnerships, BD)
+ *  5. Recency                 — recently connected contacts are more actionable
+ *  6. Company relationships   — bonus if their company has links (customer, partner, etc.)
+ */
+function calculateInfluence(contact, seniority, companyMembers, estimatedSize, companyLinkCount) {
+  // 1. Seniority (dominant factor): 0–30
+  const seniorityScore = seniority * 3;
+
+  // 2. Company reach: log10(employees), range ~1–6 → weighted 0–12
+  const companyReach = Math.log10(Math.max(estimatedSize || 100, 10)) * 2;
+
+  // 3. Network density: sqrt of contacts at company, capped → 0–6
+  const networkDensity = Math.min(Math.sqrt(companyMembers) * 1.5, 6);
+
+  // 4. Role relevance: business-facing roles get +3
+  const posLower = (contact.position || '').toLowerCase();
+  const roleBonus = BUSINESS_ROLES.some(r => posLower.includes(r)) ? 3 : 0;
+
+  // 5. Recency: parse connectedOn, bonus for recent connections
+  let recencyBonus = 0;
+  if (contact.connectedOn) {
+    try {
+      // Handle various date formats (German locale, ISO, etc.)
+      const dateStr = contact.connectedOn.replace(/\./g, '/');
+      const connDate = new Date(dateStr);
+      if (!isNaN(connDate.getTime())) {
+        const monthsAgo = (Date.now() - connDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
+        if (monthsAgo < 6) recencyBonus = 2;
+        else if (monthsAgo < 12) recencyBonus = 1;
+      }
+    } catch { /* ignore unparsable dates */ }
+  }
+
+  // 6. Company relationships: bonus per link (customer/partner = more strategic value)
+  const relationshipBonus = Math.min(companyLinkCount * 2, 8);
+
+  return seniorityScore + companyReach + networkDensity + roleBonus + recencyBonus + relationshipBonus;
+}
+
 // Industry classification patterns (checked against company name + member positions)
 const INDUSTRY_PATTERNS = {
   'Technology': ['software', 'tech', 'digital', 'saas', 'cloud', ' ai ', 'data ', 'cyber', 'platform', 'iot', 'robotik', 'informatik'],
@@ -53,8 +99,9 @@ export function calculateSeniority(position) {
  * @param {number} minCompanySize - Minimum contacts per company to show
  * @param {string} userCompany - User's own company name (always shown, centered)
  * @param {string} industryFilter - Industry to filter by ("all" = no filter)
+ * @param {Array} companyRelationships - Company-to-company relationships [{source, target, type}]
  */
-export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all") {
+export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = []) {
   // Group contacts by company
   const companyMap = {};
   contacts.forEach(c => {
@@ -104,12 +151,27 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
 
   // Create contact nodes (only for companies that passed all filters)
   const includedCompanies = new Set(companyNodes.map(c => c.name));
+  const companySizeMap = {};
+  companyNodes.forEach(c => { companySizeMap[c.name] = c.estimatedSize; });
+
+  // Count company relationships per company name
+  const companyLinkCounts = {};
+  (companyRelationships || []).forEach(rel => {
+    // source/target are like "company_ACME" — extract the name
+    const src = (rel.source || '').replace(/^company_/, '');
+    const tgt = (rel.target || '').replace(/^company_/, '');
+    companyLinkCounts[src] = (companyLinkCounts[src] || 0) + 1;
+    companyLinkCounts[tgt] = (companyLinkCounts[tgt] || 0) + 1;
+  });
+
   const contactNodes = contacts
     .filter(c => includedCompanies.has(c.company?.trim()))
     .map(c => {
       const seniority = calculateSeniority(c.position);
-      const companySize = filteredCompanyMap[c.company]?.length || 1;
-      const influenceScore = seniority * 1.5 + companySize * 0.5;
+      const companyMembers = filteredCompanyMap[c.company]?.length || 1;
+      const estimatedSize = companySizeMap[c.company] || 100;
+      const companyLinkCount = companyLinkCounts[c.company?.trim()] || 0;
+      const influenceScore = calculateInfluence(c, seniority, companyMembers, estimatedSize, companyLinkCount);
       const isUser = typeof c.id === 'string' && c.id.startsWith('user_');
 
       return {

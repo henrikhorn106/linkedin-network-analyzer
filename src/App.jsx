@@ -157,7 +157,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [minCompanySize, setMinCompanySize] = useState(1);
   const [seniorityFilter, setSeniorityFilter] = useState(0);
-  const [showCompanyLinks, setShowCompanyLinks] = useState(true);
+  const [companyLinkFilter, setCompanyLinkFilter] = useState("all");
   const [linkingMode, setLinkingMode] = useState(null);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [showAddCompanyModal, setShowAddCompanyModal] = useState(false);
@@ -193,8 +193,8 @@ export default function App() {
 
   // Build network (pass user's company to always show it centered)
   const network = useMemo(() =>
-    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter),
-    [filteredContacts, minCompanySize, company?.name, industryFilter]
+    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships),
+    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships]
   );
 
   // Top influencers
@@ -221,6 +221,15 @@ export default function App() {
     });
     return links;
   }, [inferredCompanyLinks, companyRelationships]);
+
+  // Filter company links by relationship type
+  const filteredCompanyLinks = useMemo(() => {
+    if (companyLinkFilter === "all") return allCompanyLinks;
+    if (companyLinkFilter === "none") return [];
+    return allCompanyLinks.filter(l => l.type === companyLinkFilter);
+  }, [allCompanyLinks, companyLinkFilter]);
+
+  const showCompanyLinks = companyLinkFilter !== "none";
 
   // Company colors — stable hash per company name so colors don't shift on re-render
   const companyColors = useMemo(() => {
@@ -357,9 +366,9 @@ export default function App() {
         setMinCompanySize={setMinCompanySize}
         seniorityFilter={seniorityFilter}
         setSeniorityFilter={setSeniorityFilter}
-        showCompanyLinks={showCompanyLinks}
-        setShowCompanyLinks={setShowCompanyLinks}
-        allCompanyLinksCount={allCompanyLinks.length}
+        companyLinkFilter={companyLinkFilter}
+        setCompanyLinkFilter={setCompanyLinkFilter}
+        allCompanyLinks={allCompanyLinks}
         industryFilter={industryFilter}
         setIndustryFilter={setIndustryFilter}
         availableIndustries={network.allIndustries || []}
@@ -384,7 +393,7 @@ export default function App() {
               network={network}
               companyColors={companyColors}
               showCompanyLinks={showCompanyLinks}
-              allCompanyLinks={allCompanyLinks}
+              allCompanyLinks={filteredCompanyLinks}
               linkingMode={linkingMode}
               onCompanyClick={handleCompanyClick}
               setSelectedContact={setSelectedContact}
@@ -410,7 +419,7 @@ export default function App() {
 
             <Legend
               showCompanyLinks={showCompanyLinks}
-              companyLinkCount={allCompanyLinks.length}
+              companyLinkCount={filteredCompanyLinks.length}
             />
 
             <LinkingModeIndicator
@@ -419,7 +428,8 @@ export default function App() {
             />
 
             <PerformanceHint
-              contactCount={contacts.length}
+              totalContacts={contacts.length}
+              renderedNodes={network.contactNodes.length + network.companyNodes.length}
               linkingMode={linkingMode}
             />
           </div>

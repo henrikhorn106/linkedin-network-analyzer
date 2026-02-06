@@ -408,8 +408,6 @@ export function NetworkGraph({
     const contactRadius = (d) => isLargeNetwork ? 1.5 + (d.normalizedInfluence || 0) * 4 : 2.5 + (d.normalizedInfluence || 0) * 7;
 
     const contactGroup = g.append("g");
-    // Start hidden — contacts appear when zoomed in past contactThreshold
-    contactGroup.attr("display", "none");
     _contactGroup = contactGroup;
 
     const cN = contactGroup.selectAll("circle").data(nodes.filter(n => n.type === "contact" && !n.isUser)).join("circle")
