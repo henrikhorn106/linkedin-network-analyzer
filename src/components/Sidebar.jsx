@@ -58,6 +58,12 @@ export function Sidebar({
   const [editSize, setEditSize] = useState('');
   const [editIndustry, setEditIndustry] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editWebsite, setEditWebsite] = useState('');
+  const [editHQ, setEditHQ] = useState('');
+  const [editFoundedYear, setEditFoundedYear] = useState('');
+  const [editCompanyType, setEditCompanyType] = useState('');
+  const [editLinkedinUrl, setEditLinkedinUrl] = useState('');
 
   // Enrichment state
   const [enrichment, setEnrichment] = useState(null);
@@ -102,8 +108,14 @@ export function Sidebar({
   const startEditing = () => {
     setEditName(selectedCompany.name);
     setEditSize(selectedCompany.estimatedSize || '');
-    setEditIndustry(isUserCompany ? (userCompany.industry || '') : '');
+    setEditIndustry(enrichment?.industry || (isUserCompany ? (userCompany.industry || '') : ''));
     setEditColor(isUserCompany ? (userCompany.color || P.accent) : '');
+    setEditDescription(enrichment?.description || '');
+    setEditWebsite(enrichment?.website || '');
+    setEditHQ(enrichment?.headquarters || '');
+    setEditFoundedYear(enrichment?.founded_year || '');
+    setEditCompanyType(enrichment?.company_type || '');
+    setEditLinkedinUrl(enrichment?.linkedin_url || '');
     setIsEditing(true);
   };
 
@@ -120,11 +132,23 @@ export function Sidebar({
     try {
       if (isUserCompany) {
         await updateCompany({ name: newName, estimated_size: newSize, industry: editIndustry || null, color: editColor || null });
-        await renameCompany(oldName, newName, newSize);
-      } else {
-        await renameCompany(oldName, newName, newSize);
       }
-      // Update selectedCompany with new data
+      await renameCompany(oldName, newName, newSize);
+
+      // Save enrichment data for all companies
+      const enrichmentData = {
+        description: editDescription.trim() || null,
+        website: editWebsite.trim() || null,
+        headquarters: editHQ.trim() || null,
+        founded_year: editFoundedYear ? Number(editFoundedYear) : null,
+        company_type: editCompanyType.trim() || null,
+        linkedin_url: editLinkedinUrl.trim() || null,
+        industry: editIndustry || null,
+        estimated_size: newSize,
+      };
+      const saved = await saveCompanyEnrichment(newName, enrichmentData);
+      setEnrichment(saved);
+
       setSelectedCompany(prev => prev ? {
         ...prev,
         id: `company_${newName}`,
@@ -175,117 +199,138 @@ export function Sidebar({
           {isEditing ? (
             /* Edit form */
             <div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ display: "block", fontSize: 9, color: P.textDim, marginBottom: 4, letterSpacing: "0.5px" }}>
-                  FIRMENNAME
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  style={{
-                    width: "100%", padding: "7px 10px", background: P.bg,
-                    border: `1px solid ${P.border}`, borderRadius: 5,
-                    color: P.text, fontSize: 12, fontFamily: "inherit",
-                    outline: "none", boxSizing: "border-box",
-                  }}
-                />
-              </div>
+              {(() => {
+                const inputStyle = {
+                  width: "100%", padding: "7px 10px", background: P.bg,
+                  border: `1px solid ${P.border}`, borderRadius: 5,
+                  color: P.text, fontSize: 12, fontFamily: "inherit",
+                  outline: "none", boxSizing: "border-box",
+                };
+                const labelStyle = { display: "block", fontSize: 9, color: P.textDim, marginBottom: 4, letterSpacing: "0.5px" };
+                const fieldStyle = { marginBottom: 10 };
 
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ display: "block", fontSize: 9, color: P.textDim, marginBottom: 4, letterSpacing: "0.5px" }}>
-                  GESCHÄTZTE GRÖßE (MITARBEITER)
-                </label>
-                <input
-                  type="number"
-                  value={editSize}
-                  onChange={e => setEditSize(e.target.value)}
-                  placeholder="z.B. 50"
-                  min="1"
-                  style={{
-                    width: "100%", padding: "7px 10px", background: P.bg,
-                    border: `1px solid ${P.border}`, borderRadius: 5,
-                    color: P.text, fontSize: 12, fontFamily: "inherit",
-                    outline: "none", boxSizing: "border-box",
-                  }}
-                />
-              </div>
-
-              {isUserCompany && (
-                <>
-                  <div style={{ marginBottom: 10 }}>
-                    <label style={{ display: "block", fontSize: 9, color: P.textDim, marginBottom: 4, letterSpacing: "0.5px" }}>
-                      BRANCHE
-                    </label>
-                    <select
-                      value={editIndustry}
-                      onChange={e => setEditIndustry(e.target.value)}
-                      style={{
-                        width: "100%", padding: "7px 10px", background: P.bg,
-                        border: `1px solid ${P.border}`, borderRadius: 5,
-                        color: editIndustry ? P.text : P.textMuted,
-                        fontSize: 12, fontFamily: "inherit",
-                        outline: "none", boxSizing: "border-box",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <option value="">Branche auswählen...</option>
-                      {INDUSTRIES.map(ind => (
-                        <option key={ind} value={ind}>{ind}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ marginBottom: 10 }}>
-                    <label style={{ display: "block", fontSize: 9, color: P.textDim, marginBottom: 4, letterSpacing: "0.5px" }}>
-                      BUBBLE-FARBE
-                    </label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                      {COLOR_PRESETS.map(c => (
-                        <button
-                          key={c}
-                          onClick={() => setEditColor(c)}
-                          style={{
-                            width: 22, height: 22, borderRadius: 5,
-                            background: c,
-                            border: editColor === c ? `2px solid ${P.text}` : `2px solid transparent`,
-                            cursor: "pointer",
-                            outline: "none",
-                            boxShadow: editColor === c ? `0 0 6px ${c}60` : "none",
-                          }}
-                        />
-                      ))}
+                return (
+                  <>
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>FIRMENNAME</label>
+                      <input type="text" value={editName} onChange={e => setEditName(e.target.value)} style={inputStyle} />
                     </div>
-                  </div>
-                </>
-              )}
 
-              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <button
-                  onClick={saveEditing}
-                  style={{
-                    flex: 1, padding: "7px 0",
-                    background: P.accent, border: "none", borderRadius: 5,
-                    color: "#000", fontSize: 10, fontWeight: 700,
-                    cursor: "pointer", fontFamily: "inherit",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  SPEICHERN
-                </button>
-                <button
-                  onClick={cancelEditing}
-                  style={{
-                    flex: 1, padding: "7px 0",
-                    background: "transparent", border: `1px solid ${P.border}`,
-                    borderRadius: 5, color: P.textDim, fontSize: 10,
-                    cursor: "pointer", fontFamily: "inherit",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  ABBRECHEN
-                </button>
-              </div>
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>BESCHREIBUNG</label>
+                      <textarea
+                        value={editDescription}
+                        onChange={e => setEditDescription(e.target.value)}
+                        placeholder="Was macht die Firma?"
+                        rows={2}
+                        style={{ ...inputStyle, resize: "vertical", minHeight: 40 }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={labelStyle}>MITARBEITER</label>
+                        <input type="number" value={editSize} onChange={e => setEditSize(e.target.value)} placeholder="z.B. 50" min="1" style={inputStyle} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={labelStyle}>GEGRÜNDET</label>
+                        <input type="number" value={editFoundedYear} onChange={e => setEditFoundedYear(e.target.value)} placeholder="z.B. 2015" min="1800" max="2030" style={inputStyle} />
+                      </div>
+                    </div>
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>BRANCHE</label>
+                      <select
+                        value={editIndustry}
+                        onChange={e => setEditIndustry(e.target.value)}
+                        style={{ ...inputStyle, cursor: "pointer", color: editIndustry ? P.text : P.textMuted }}
+                      >
+                        <option value="">Branche auswählen...</option>
+                        {INDUSTRIES.map(ind => (
+                          <option key={ind} value={ind}>{ind}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>FIRMENTYP</label>
+                      <select
+                        value={editCompanyType}
+                        onChange={e => setEditCompanyType(e.target.value)}
+                        style={{ ...inputStyle, cursor: "pointer", color: editCompanyType ? P.text : P.textMuted }}
+                      >
+                        <option value="">Typ auswählen...</option>
+                        {["Startup", "Mittelstand", "Enterprise", "Konzern", "Agentur", "Beratung"].map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>HAUPTSITZ</label>
+                      <input type="text" value={editHQ} onChange={e => setEditHQ(e.target.value)} placeholder="z.B. Berlin, Deutschland" style={inputStyle} />
+                    </div>
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>WEBSITE</label>
+                      <input type="url" value={editWebsite} onChange={e => setEditWebsite(e.target.value)} placeholder="https://..." style={inputStyle} />
+                    </div>
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>LINKEDIN URL</label>
+                      <input type="url" value={editLinkedinUrl} onChange={e => setEditLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/company/..." style={inputStyle} />
+                    </div>
+
+                    {isUserCompany && (
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>BUBBLE-FARBE</label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                          {COLOR_PRESETS.map(c => (
+                            <button
+                              key={c}
+                              onClick={() => setEditColor(c)}
+                              style={{
+                                width: 22, height: 22, borderRadius: 5,
+                                background: c,
+                                border: editColor === c ? `2px solid ${P.text}` : `2px solid transparent`,
+                                cursor: "pointer", outline: "none",
+                                boxShadow: editColor === c ? `0 0 6px ${c}60` : "none",
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                      <button
+                        onClick={saveEditing}
+                        style={{
+                          flex: 1, padding: "7px 0",
+                          background: P.accent, border: "none", borderRadius: 5,
+                          color: "#000", fontSize: 10, fontWeight: 700,
+                          cursor: "pointer", fontFamily: "inherit",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        SPEICHERN
+                      </button>
+                      <button
+                        onClick={cancelEditing}
+                        style={{
+                          flex: 1, padding: "7px 0",
+                          background: "transparent", border: `1px solid ${P.border}`,
+                          borderRadius: 5, color: P.textDim, fontSize: 10,
+                          cursor: "pointer", fontFamily: "inherit",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        ABBRECHEN
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           ) : (
             /* Display view */
