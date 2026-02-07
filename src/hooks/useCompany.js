@@ -84,6 +84,18 @@ export function useCompany(userId) {
   const saveCompanyEnrichment = useCallback(async (companyName, enrichmentData) => {
     if (!userId) return null;
 
+    // Normalize: convert null/undefined to empty string for text fields
+    const d = {
+      description: enrichmentData.description || '',
+      website: enrichmentData.website || '',
+      headquarters: enrichmentData.headquarters || '',
+      founded_year: enrichmentData.founded_year || null,
+      company_type: enrichmentData.company_type || '',
+      linkedin_url: enrichmentData.linkedin_url || '',
+      industry: enrichmentData.industry || '',
+      estimated_size: enrichmentData.estimated_size || null,
+    };
+
     const existing = getCompanyEnrichment(companyName);
     const now = new Date().toISOString();
 
@@ -92,23 +104,23 @@ export function useCompany(userId) {
         `UPDATE companies SET
           description = ?, website = ?, headquarters = ?, founded_year = ?,
           company_type = ?, linkedin_url = ?, enriched_at = ?,
-          industry = COALESCE(?, industry),
+          industry = COALESCE(NULLIF(?, ''), industry),
           estimated_size = COALESCE(?, estimated_size)
         WHERE id = ?`,
         [
-          enrichmentData.description || null,
-          enrichmentData.website || null,
-          enrichmentData.headquarters || null,
-          enrichmentData.founded_year || null,
-          enrichmentData.company_type || null,
-          enrichmentData.linkedin_url || null,
+          d.description,
+          d.website,
+          d.headquarters,
+          d.founded_year,
+          d.company_type,
+          d.linkedin_url,
           now,
-          enrichmentData.industry || null,
-          enrichmentData.estimated_size || null,
+          d.industry,
+          d.estimated_size,
           existing.id,
         ]
       );
-      return { ...existing, ...enrichmentData, enriched_at: now };
+      return { ...existing, ...d, enriched_at: now };
     } else {
       await execute(
         `INSERT INTO companies (user_id, name, description, website, headquarters, founded_year, company_type, linkedin_url, enriched_at, industry, estimated_size)
@@ -116,18 +128,18 @@ export function useCompany(userId) {
         [
           userId,
           companyName,
-          enrichmentData.description || null,
-          enrichmentData.website || null,
-          enrichmentData.headquarters || null,
-          enrichmentData.founded_year || null,
-          enrichmentData.company_type || null,
-          enrichmentData.linkedin_url || null,
+          d.description,
+          d.website,
+          d.headquarters,
+          d.founded_year,
+          d.company_type,
+          d.linkedin_url,
           now,
-          enrichmentData.industry || null,
-          enrichmentData.estimated_size || null,
+          d.industry,
+          d.estimated_size,
         ]
       );
-      return { name: companyName, ...enrichmentData, enriched_at: now };
+      return { name: companyName, ...d, enriched_at: now };
     }
   }, [userId, getCompanyEnrichment]);
 

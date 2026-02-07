@@ -140,12 +140,69 @@ export function extractWithRules(notes) {
 
 /**
  * Enrich company data using OpenAI API
- * Takes company name + known contacts/positions for context
+ * Takes company name + rich context for better results
  */
-export async function enrichCompanyWithAI(companyName, contacts, apiKey) {
-  const contactContext = contacts.length > 0
-    ? `\nBekannte Kontakte bei dieser Firma:\n${contacts.map(c => `- ${c.name}: ${c.position || 'Connection'}`).join('\n')}`
-    : '';
+export async function enrichCompanyWithAI(companyName, context, apiKey) {
+  const { contacts = [], relationships = [], userCompany = null, estimatedSize = null, currentIndustry = null } = context;
+
+  // Build contact context with seniority analysis
+  let contactSection = '';
+  if (contacts.length > 0) {
+    const positionCounts = {};
+    contacts.forEach(c => {
+      const pos = c.position || 'Connection';
+      positionCounts[pos] = (positionCounts[pos] || 0) + 1;
+    });
+
+    const seniorContacts = contacts.filter(c => {
+      const p = (c.position || '').toLowerCase();
+      return /ceo|cto|cfo|coo|cmo|founder|gründer|director|head|vp|vice president|geschäftsführer|vorstand|partner|inhaber/i.test(p);
+    });
+
+    contactSection = `\n\nBekannte Kontakte (${contacts.length} gesamt):`;
+    if (seniorContacts.length > 0) {
+      contactSection += `\nFührungskräfte:`;
+      seniorContacts.forEach(c => {
+        contactSection += `\n- ${c.name}: ${c.position}`;
+        if (c.connectedOn) contactSection += ` (verbunden seit ${c.connectedOn})`;
+      });
+    }
+
+    contactSection += `\n\nPositionsverteilung:`;
+    Object.entries(positionCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .forEach(([pos, count]) => {
+        contactSection += `\n- ${pos}: ${count}x`;
+      });
+  }
+
+  // Build relationship context
+  let relationshipSection = '';
+  if (relationships.length > 0) {
+    relationshipSection = `\n\nGeschäftsbeziehungen:`;
+    relationships.forEach(r => {
+      const direction = r.source === `company_${companyName}` ? 'ist' : 'hat';
+      const otherName = r.source === `company_${companyName}` ? r.targetName : r.sourceName;
+      relationshipSection += `\n- ${direction} ${r.typeLabel} von/für ${otherName}`;
+    });
+  }
+
+  // Build user company context
+  let userContext = '';
+  if (userCompany) {
+    userContext = `\n\nKontext: Der Nutzer arbeitet bei "${userCompany.name}"`;
+    if (userCompany.industry) userContext += ` (Branche: ${userCompany.industry})`;
+    userContext += `. Die zu analysierende Firma ist Teil seines LinkedIn-Netzwerks.`;
+  }
+
+  // Build existing data context
+  let existingData = '';
+  if (estimatedSize || currentIndustry) {
+    existingData = '\n\nBereits bekannte Daten:';
+    if (estimatedSize) existingData += `\n- Geschätzte Größe: ~${estimatedSize} Mitarbeiter`;
+    if (currentIndustry) existingData += `\n- Branche (vermutet): ${currentIndustry}`;
+  }
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -158,25 +215,37 @@ export async function enrichCompanyWithAI(companyName, contacts, apiKey) {
       messages: [
         {
           role: 'system',
-          content: `Du bist ein Business-Research-Assistent. Du erhältst einen Firmennamen und optional bekannte Kontakte.
-Recherchiere basierend auf deinem Wissen über die Firma und antworte NUR mit validem JSON:
+          content: `Du bist ein erstklassiger Business-Intelligence-Analyst. Du erhältst umfangreiche Kontextdaten über eine Firma aus einem LinkedIn-Netzwerk und sollst möglichst präzise Firmendaten zusammenstellen.
+
+Nutze die Kontaktpositionen, um auf die Firmenstruktur und -größe zu schließen.
+Nutze Geschäftsbeziehungen, um den Marktkontext zu verstehen.
+Nutze die Positionsverteilung, um die Branche und den Firmentyp einzugrenzen.
+
+Antworte NUR mit validem JSON. Jedes Feld MUSS einen Wert haben, NIEMALS null:
 {
-  "description": "Kurze Beschreibung (1-2 Sätze) was die Firma macht",
-  "industry": "Branche (z.B. Technologie, Beratung, Finanzdienstleistungen, Marketing & Werbung, E-Commerce, Gesundheitswesen, Bildung, Produktion, Immobilien)",
-  "website": "https://... (offizielle Website, oder null wenn unbekannt)",
-  "headquarters": "Stadt, Land (Hauptsitz)",
+  "description": "Präzise Beschreibung (2-3 Sätze): Was macht die Firma, Kernprodukte/Services, Zielmarkt",
+  "industry": "Eine der folgenden: Technologie, Finanzdienstleistungen, Beratung, Marketing & Werbung, E-Commerce, Gesundheitswesen, Bildung, Produktion, Immobilien, Sonstiges",
+  "website": "https://firmenname.com (bestmögliche URL)",
+  "headquarters": "Stadt, Land",
   "founded_year": 2010,
   "company_type": "Enterprise/Startup/Mittelstand/Agentur/Beratung/Konzern",
-  "linkedin_url": "https://linkedin.com/company/... (oder null wenn unbekannt)",
+  "linkedin_url": "https://linkedin.com/company/firmenname",
   "estimated_size": 500
 }
-Wenn du dir bei einem Feld nicht sicher bist, setze es auf null.
-Schätze die Firmengröße basierend auf dem Kontext (Startup: 10-50, Mittelstand: 50-500, Enterprise: 500+).
-Antworte NUR mit dem JSON-Objekt, kein zusätzlicher Text.`
+
+Regeln:
+- Nutze dein Wissen UND die bereitgestellten Kontextdaten
+- Wenn viele Senior-Positionen vorhanden sind, ist die Firma wahrscheinlich größer
+- Wenn die Positionsverteilung auf Entwickler/Engineers hindeutet → Technologie
+- Wenn Sales/Account-Manager dominieren → möglicherweise B2B/Beratung
+- WICHTIG: Gib NIEMALS null zurück. Jedes Feld MUSS einen Wert haben. Mache immer eine bestmögliche Schätzung basierend auf dem Kontext.
+- estimated_size soll realistisch sein: Startup 5-50, Mittelstand 50-500, Enterprise 500+
+- Wenn du die Website nicht kennst, konstruiere eine plausible URL (z.B. https://firmenname.com)
+- Wenn du das Gründungsjahr nicht kennst, schätze es basierend auf Firmengröße und Branche`
         },
         {
           role: 'user',
-          content: `Firma: ${companyName}${contactContext}`
+          content: `Firma: ${companyName}${existingData}${contactSection}${relationshipSection}${userContext}`
         }
       ],
       temperature: 0.3,

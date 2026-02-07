@@ -91,8 +91,35 @@ export function Sidebar({
     setIsEnriching(true);
     setEnrichError(null);
     try {
-      const companyContacts = (contacts || []).filter(c => c.company === selectedCompany.name);
-      const result = await enrichCompanyWithAI(selectedCompany.name, companyContacts, apiKey);
+      const companyContacts = (contacts || []).filter(
+        c => c.company?.toLowerCase() === selectedCompany.name.toLowerCase()
+      );
+
+      // Build relationship context with readable names
+      const rels = (companyRelationships || [])
+        .filter(r => r.source === selectedCompany.id || r.target === selectedCompany.id)
+        .map(r => {
+          const otherId = r.source === selectedCompany.id ? r.target : r.source;
+          const otherNode = companyNodes.find(c => c.id === otherId);
+          const info = RELATIONSHIP_TYPES[r.type] || { label: r.type };
+          return {
+            source: r.source,
+            target: r.target,
+            sourceName: r.source === selectedCompany.id ? selectedCompany.name : (otherNode?.name || 'Unbekannt'),
+            targetName: r.target === selectedCompany.id ? selectedCompany.name : (otherNode?.name || 'Unbekannt'),
+            typeLabel: info.label,
+          };
+        });
+
+      const context = {
+        contacts: companyContacts,
+        relationships: rels,
+        userCompany: userCompany ? { name: userCompany.name, industry: userCompany.industry } : null,
+        estimatedSize: selectedCompany.estimatedSize,
+        currentIndustry: enrichment?.industry || selectedCompany.industry || null,
+      };
+
+      const result = await enrichCompanyWithAI(selectedCompany.name, context, apiKey);
       const saved = await saveCompanyEnrichment(selectedCompany.name, result);
       setEnrichment(saved);
     } catch (err) {
