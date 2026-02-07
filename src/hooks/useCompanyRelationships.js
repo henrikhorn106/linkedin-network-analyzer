@@ -62,6 +62,21 @@ export function useCompanyRelationships(userId) {
     if (existing.length > 0) return existing[0];
 
     try {
+      // Auto-upgrade: creating "customer" removes existing "lead" between same pair
+      if (relationship.type === 'customer') {
+        const leadRows = query(
+          `SELECT id FROM company_relationships
+           WHERE user_id = ? AND source_company = ? AND target_company = ? AND relationship_type = 'lead'`,
+          [userId, cleanSource, cleanTarget]
+        );
+        for (const row of leadRows) {
+          await execute('DELETE FROM company_relationships WHERE id = ?', [row.id]);
+        }
+        if (leadRows.length > 0) {
+          setRelationships(prev => prev.filter(r => !leadRows.some(lr => lr.id === r.id)));
+        }
+      }
+
       await execute(
         `INSERT INTO company_relationships (user_id, source_company, target_company, relationship_type, created_at)
          VALUES (?, ?, ?, ?, datetime('now'))`,

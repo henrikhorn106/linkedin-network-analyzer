@@ -214,9 +214,11 @@ export default function App() {
   const allCompanyLinks = useMemo(() => {
     const links = [...inferredCompanyLinks];
     companyRelationships.forEach(rel => {
+      // Only skip if exact same pair AND same type already exists
       const exists = links.find(l =>
-        (l.source === rel.source && l.target === rel.target) ||
-        (l.source === rel.target && l.target === rel.source)
+        l.type === rel.type &&
+        ((l.source === rel.source && l.target === rel.target) ||
+         (l.source === rel.target && l.target === rel.source))
       );
       if (!exists) {
         links.push({ ...rel, strength: 1 });

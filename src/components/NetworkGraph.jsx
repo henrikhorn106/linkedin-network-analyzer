@@ -75,6 +75,7 @@ export function NetworkGraph({
 
     // Arrow markers for company-to-company links
     const arrowTypes = {
+      lead: { color: "#F59E0B", bidir: false },
       customer: { color: "#00E5A0", bidir: false },
       partner: { color: "#8B5CF6", bidir: true },
       investor: { color: "#3B82F6", bidir: false },
@@ -86,7 +87,7 @@ export function NetworkGraph({
         .attr("id", `arrow-${type}`)
         .attr("viewBox", "0 -5 10 10")
         .attr("refX", 10).attr("refY", 0)
-        .attr("markerWidth", 3).attr("markerHeight", 5)
+        .attr("markerWidth", 5).attr("markerHeight", 5)
         .attr("orient", "auto")
         .append("path")
         .attr("d", "M0,-4L10,0L0,4")
@@ -229,6 +230,27 @@ export function NetworkGraph({
     }) : [];
 
     const getArrowType = (d) => d.type && arrowTypes[d.type] ? d.type : "inferred";
+
+    // Pre-compute curve offset for links sharing the same company pair
+    const linkPairKey = (d) => {
+      const s = typeof d.source === "object" ? d.source.id : d.source;
+      const t = typeof d.target === "object" ? d.target.id : d.target;
+      return s < t ? `${s}|${t}` : `${t}|${s}`;
+    };
+    const pairGroups = {};
+    companyLinkData.forEach(d => {
+      const key = linkPairKey(d);
+      if (!pairGroups[key]) pairGroups[key] = [];
+      pairGroups[key].push(d);
+    });
+    const linkCurve = new Map();
+    Object.values(pairGroups).forEach(group => {
+      const n = group.length;
+      group.forEach((d, i) => {
+        // Single link: straight (0). Multiple: curve outward, centered around 0
+        linkCurve.set(d, n === 1 ? 0 : (i - (n - 1) / 2) * 0.4);
+      });
+    });
 
     const companyLink = g.append("g").selectAll("path").data(companyLinkData).join("path")
       .attr("stroke", d => {
@@ -501,14 +523,26 @@ export function NetworkGraph({
           const dy = targetNode.y - sourceNode.y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
           const ux = dx / dist, uy = dy / dist;
-          // Offset by company bubble radius so arrows sit at the edge
           const sr = getCompanyRadius(sourceNode) + 4;
           const tr = getCompanyRadius(targetNode) + 4;
           const x1 = sourceNode.x + ux * sr;
           const y1 = sourceNode.y + uy * sr;
           const x2 = targetNode.x - ux * tr;
           const y2 = targetNode.y - uy * tr;
-          d3.select(this).attr("d", `M${x1},${y1}L${x2},${y2}`);
+          const curve = linkCurve.get(d) || 0;
+          if (curve === 0) {
+            d3.select(this).attr("d", `M${x1},${y1}L${x2},${y2}`);
+          } else {
+            // Use canonical direction so curves bow consistently regardless of link direction
+            const sId = typeof d.source === "object" ? d.source.id : d.source;
+            const tId = typeof d.target === "object" ? d.target.id : d.target;
+            const flip = sId > tId ? -1 : 1;
+            const mx = (x1 + x2) / 2;
+            const my = (y1 + y2) / 2;
+            const cpx = mx + (-uy) * dist * curve * flip;
+            const cpy = my + ux * dist * curve * flip;
+            d3.select(this).attr("d", `M${x1},${y1}Q${cpx},${cpy} ${x2},${y2}`);
+          }
         }
       });
 

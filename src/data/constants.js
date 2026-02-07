@@ -1,5 +1,6 @@
 // Company relationship types for visualization
 export const RELATIONSHIP_TYPES = {
+  lead: { label: "Lead", reverseLabel: "Anbieter", color: "#F59E0B", icon: "◎" },
   customer: { label: "Kunde", reverseLabel: "Lieferant", color: "#00E5A0", icon: "→" },
   partner: { label: "Partner", color: "#8B5CF6", icon: "↔" },
   investor: { label: "Investor", color: "#3B82F6", icon: "$" },

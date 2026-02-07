@@ -69,7 +69,7 @@ export function Sidebar({
   const [enrichment, setEnrichment] = useState(null);
   const [isEnriching, setIsEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState(null);
-  const [suggestedSize, setSuggestedSize] = useState(null);
+  const [pendingEnrichment, setPendingEnrichment] = useState(null);
 
   // Load enrichment when company changes
   useEffect(() => {
@@ -80,7 +80,7 @@ export function Sidebar({
       setEnrichment(null);
     }
     setEnrichError(null);
-    setSuggestedSize(null);
+    setPendingEnrichment(null);
   }, [selectedCompany?.name, getCompanyEnrichment]);
 
   const handleEnrich = async () => {
@@ -122,14 +122,7 @@ export function Sidebar({
       };
 
       const result = await enrichCompanyWithAI(selectedCompany.name, context, apiKey);
-      const saved = await saveCompanyEnrichment(selectedCompany.name, result);
-      setEnrichment(saved);
-
-      // Always prompt user with AI's employee count suggestion
-      const aiSize = result.estimated_size ? Number(result.estimated_size) : null;
-      if (aiSize) {
-        setSuggestedSize(aiSize);
-      }
+      setPendingEnrichment(result);
     } catch (err) {
       console.error('Enrichment failed:', err);
       setEnrichError('Anreicherung fehlgeschlagen. Bitte versuche es erneut.');
@@ -498,46 +491,100 @@ export function Sidebar({
                 </div>
               )}
 
-              {/* Suggested size prompt */}
-              {suggestedSize && (
-                <div style={{
-                  marginTop: 8, padding: 10, background: P.accent + "10",
-                  borderRadius: 6, border: `1px solid ${P.accent}30`,
-                }}>
-                  <div style={{ fontSize: 9, color: P.text, marginBottom: 6 }}>
-                    KI schlägt <span style={{ fontWeight: 700, color: P.accent }}>{suggestedSize.toLocaleString('de-DE')}</span> Mitarbeiter vor
-                    <span style={{ color: P.textDim }}> (aktuell: {selectedCompany.estimatedSize?.toLocaleString('de-DE') || '?'})</span>
+              {/* Pending enrichment — editable preview */}
+              {pendingEnrichment && (() => {
+                const inputStyle = {
+                  width: "100%", padding: "5px 8px", background: P.bg,
+                  border: `1px solid ${P.border}`, borderRadius: 4,
+                  color: P.text, fontSize: 10, fontFamily: "inherit",
+                  outline: "none", boxSizing: "border-box",
+                };
+                const labelStyle = { fontSize: 8, color: P.textDim, marginBottom: 2, letterSpacing: "0.3px" };
+                const fieldStyle = { marginBottom: 6 };
+                const update = (key, val) => setPendingEnrichment(prev => ({ ...prev, [key]: val }));
+                return (
+                  <div style={{
+                    marginTop: 8, padding: 10, background: P.purple + "08",
+                    borderRadius: 6, border: `1px solid ${P.purple}30`,
+                  }}>
+                    <div style={{ fontSize: 9, color: P.purple, fontWeight: 700, letterSpacing: "0.5px", marginBottom: 8 }}>
+                      KI-VORSCHLAG — BEARBEITEN
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>BESCHREIBUNG</div>
+                      <textarea
+                        value={pendingEnrichment.description || ''}
+                        onChange={e => update('description', e.target.value)}
+                        rows={2}
+                        style={{ ...inputStyle, resize: "vertical", minHeight: 36 }}
+                      />
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>BRANCHE</div>
+                      <input value={pendingEnrichment.industry || ''} onChange={e => update('industry', e.target.value)} style={inputStyle} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6, ...fieldStyle }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={labelStyle}>MITARBEITER</div>
+                        <input type="number" value={pendingEnrichment.estimated_size || ''} onChange={e => update('estimated_size', e.target.value)} min="1" style={inputStyle} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={labelStyle}>GEGRÜNDET</div>
+                        <input type="number" value={pendingEnrichment.founded_year || ''} onChange={e => update('founded_year', e.target.value)} min="1800" max="2030" style={inputStyle} />
+                      </div>
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>FIRMENTYP</div>
+                      <input value={pendingEnrichment.company_type || ''} onChange={e => update('company_type', e.target.value)} style={inputStyle} />
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>HAUPTSITZ</div>
+                      <input value={pendingEnrichment.headquarters || ''} onChange={e => update('headquarters', e.target.value)} style={inputStyle} />
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>WEBSITE</div>
+                      <input value={pendingEnrichment.website || ''} onChange={e => update('website', e.target.value)} style={inputStyle} />
+                    </div>
+                    <div style={fieldStyle}>
+                      <div style={labelStyle}>LINKEDIN URL</div>
+                      <input value={pendingEnrichment.linkedin_url || ''} onChange={e => update('linkedin_url', e.target.value)} style={inputStyle} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      <button
+                        onClick={async () => {
+                          const saved = await saveCompanyEnrichment(selectedCompany.name, pendingEnrichment);
+                          setEnrichment(saved);
+                          const aiSize = pendingEnrichment.estimated_size ? Number(pendingEnrichment.estimated_size) : null;
+                          if (aiSize) {
+                            await renameCompany(selectedCompany.name, selectedCompany.name, aiSize);
+                            setSelectedCompany(prev => prev ? { ...prev, estimatedSize: aiSize } : null);
+                          }
+                          setPendingEnrichment(null);
+                        }}
+                        style={{
+                          flex: 1, padding: "5px 0",
+                          background: P.accent, border: "none", borderRadius: 4,
+                          color: "#000", fontSize: 9, fontWeight: 700,
+                          cursor: "pointer", fontFamily: "inherit",
+                        }}
+                      >
+                        ÜBERNEHMEN
+                      </button>
+                      <button
+                        onClick={() => setPendingEnrichment(null)}
+                        style={{
+                          flex: 1, padding: "5px 0",
+                          background: "transparent", border: `1px solid ${P.border}`,
+                          borderRadius: 4, color: P.textDim, fontSize: 9,
+                          cursor: "pointer", fontFamily: "inherit",
+                        }}
+                      >
+                        IGNORIEREN
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      onClick={async () => {
-                        await renameCompany(selectedCompany.name, selectedCompany.name, suggestedSize);
-                        setSelectedCompany(prev => prev ? { ...prev, estimatedSize: suggestedSize } : null);
-                        setSuggestedSize(null);
-                      }}
-                      style={{
-                        flex: 1, padding: "5px 0",
-                        background: P.accent, border: "none", borderRadius: 4,
-                        color: "#000", fontSize: 9, fontWeight: 700,
-                        cursor: "pointer", fontFamily: "inherit",
-                      }}
-                    >
-                      ÜBERNEHMEN
-                    </button>
-                    <button
-                      onClick={() => setSuggestedSize(null)}
-                      style={{
-                        flex: 1, padding: "5px 0",
-                        background: "transparent", border: `1px solid ${P.border}`,
-                        borderRadius: 4, color: P.textDim, fontSize: 9,
-                        cursor: "pointer", fontFamily: "inherit",
-                      }}
-                    >
-                      IGNORIEREN
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </>
           )}
 
@@ -579,7 +626,11 @@ export function Sidebar({
           </div>
 
           {/* Existing relationships */}
-          {companyRelationships.filter(r => r.source === selectedCompany.id || r.target === selectedCompany.id).length > 0 && (
+          {companyRelationships.filter(r => {
+            if (r.source !== selectedCompany.id && r.target !== selectedCompany.id) return false;
+            const otherId = r.source === selectedCompany.id ? r.target : r.source;
+            return companyNodes.some(c => c.id === otherId);
+          }).length > 0 && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1px", marginBottom: 6 }}>
                 BEZIEHUNGEN
@@ -588,6 +639,7 @@ export function Sidebar({
                 if (rel.source !== selectedCompany.id && rel.target !== selectedCompany.id) return null;
                 const otherId = rel.source === selectedCompany.id ? rel.target : rel.source;
                 const otherCompany = companyNodes.find(c => c.id === otherId);
+                if (!otherCompany) return null;
                 const info = RELATIONSHIP_TYPES[rel.type] || { label: rel.type, color: P.textMuted, icon: "?" };
                 const isSource = rel.source === selectedCompany.id;
                 return (
