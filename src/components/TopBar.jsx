@@ -29,6 +29,7 @@ export function TopBar({
   onShowAddContact,
   onShowAddCompany,
   onShowSettings,
+  onRefreshCanvas,
 }) {
   const [showFilters, setShowFilters] = useState(false);
 
@@ -91,6 +92,26 @@ export function TopBar({
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M2 3h12" /><path d="M4 6.5h8" /><path d="M6 10h4" /><path d="M7 13.5h2" />
+                </svg>
+              </button>
+
+              {/* Refresh canvas */}
+              <button
+                onClick={onRefreshCanvas}
+                title="Canvas neu laden"
+                style={{
+                  width: 30, height: 30,
+                  background: P.surface + "CC",
+                  border: `1px solid ${P.border}`,
+                  borderRadius: 6, padding: 0,
+                  color: P.textMuted,
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 0.15s",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" /><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" /><polyline points="12 2.5 12 5 9.5 4.5" /><polyline points="4 13.5 4 11 6.5 11.5" />
                 </svg>
               </button>
 

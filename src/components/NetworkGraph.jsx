@@ -51,6 +51,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
   const getCompanyRadiusRef = useRef(null);
   const drawMinimapRef = useRef(null);
   const agarActiveRef = useRef(false);
+  const agarCellPosRef = useRef(null);
+  const agarEatenRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     zoomToFit: () => {
@@ -361,8 +363,11 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       }
 
       // Company dots
+      const eatenIds = agarEatenRef.current;
       for (const n of ns) {
         if (n.x == null || n.type !== 'company') continue;
+        if (eatenIds && eatenIds.has(n.id)) continue;
+        if (agarActiveRef.current && n.isUserCompany) continue; // agar cell dot replaces this
         const x = (n.x - x0) * sc + offX;
         const y = (n.y - y0) * sc + offY;
         const dimmed = connectedMap && !n.isUserCompany && !connectedMap.has(n.id);
@@ -413,6 +418,25 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         }
       }
       ctx.globalAlpha = 1;
+
+      // Agar cell dot on minimap
+      const cellPos = agarCellPosRef.current;
+      if (cellPos && agarActiveRef.current) {
+        const cx = (cellPos.x - x0) * sc + offX;
+        const cy = (cellPos.y - y0) * sc + offY;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 6);
+        grad.addColorStop(0, (userCompanyColor || P.accent));
+        grad.addColorStop(0.5, (userCompanyColor || P.accent) + '80');
+        grad.addColorStop(1, 'transparent');
+        ctx.beginPath();
+        ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fillStyle = userCompanyColor || P.accent;
+        ctx.fill();
+      }
 
       // Viewport rectangle
       const k = transform.k;
@@ -1101,7 +1125,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       cN.attr("cx", d => d.x).attr("cy", d => d.y);
 
       // Periodic viewport culling during simulation (every 10th tick)
-      if (tickCount % 10 === 0) {
+      // Skip during agar game — game controls its own camera, stale zoom transform would cull wrong nodes
+      if (tickCount % 10 === 0 && !agarActiveRef.current) {
         const t = d3.zoomTransform(svg.node());
         cullViewport(t);
         drawMinimap(t);
@@ -1443,8 +1468,59 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
     const agarStartHandler = () => {
       if (active) return;
-      active = true;
-      cleanup = runAgar();
+      // Show mode selection overlay
+      const modeOverlay = document.createElement("div");
+      Object.assign(modeOverlay.style, {
+        position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.85)", zIndex: 9999,
+        fontFamily: "'JetBrains Mono', monospace",
+      });
+      document.body.appendChild(modeOverlay);
+      const mTitle = document.createElement("div");
+      Object.assign(mTitle.style, {
+        fontSize: "24px", fontWeight: 700, color: "#fff", marginBottom: "8px", letterSpacing: "2px",
+      });
+      mTitle.textContent = "SPIELMODUS";
+      modeOverlay.appendChild(mTitle);
+      const mSub = document.createElement("div");
+      Object.assign(mSub.style, { fontSize: "10px", color: "#ffffff50", marginBottom: "32px" });
+      mSub.textContent = "Wähle deinen Modus";
+      modeOverlay.appendChild(mSub);
+      const btnRow = document.createElement("div");
+      Object.assign(btnRow.style, { display: "flex", gap: "20px" });
+      modeOverlay.appendChild(btnRow);
+      const makeBtn = (label, desc, color, mode) => {
+        const btn = document.createElement("div");
+        Object.assign(btn.style, {
+          padding: "20px 28px", borderRadius: "10px", cursor: "pointer",
+          border: `2px solid ${color}50`, background: `${color}10`,
+          textAlign: "center", transition: "all 0.2s", minWidth: "170px",
+        });
+        btn.onmouseenter = () => { btn.style.background = `${color}25`; btn.style.borderColor = color; };
+        btn.onmouseleave = () => { btn.style.background = `${color}10`; btn.style.borderColor = `${color}50`; };
+        const lbl = document.createElement("div");
+        Object.assign(lbl.style, { fontSize: "16px", fontWeight: 700, color, marginBottom: "8px" });
+        lbl.textContent = label;
+        btn.appendChild(lbl);
+        const dsc = document.createElement("div");
+        Object.assign(dsc.style, { fontSize: "9px", color: "#ffffff60", lineHeight: "1.6", whiteSpace: "pre-line" });
+        dsc.textContent = desc;
+        btn.appendChild(dsc);
+        btn.onclick = () => {
+          modeOverlay.remove();
+          window.removeEventListener("keydown", closeMode);
+          active = true;
+          cleanup = runAgar(mode);
+        };
+        btnRow.appendChild(btn);
+      };
+      makeBtn("ZEITRENNEN", "30 Sekunden um alle\nFirmen zu absorbieren", "#F59E0B", "timed");
+      makeBtn("ÜBERLEBEN", "Weiche dem Schwarzen Loch\naus und fresse alle Firmen", "#A855F7", "survival");
+      const closeMode = (e) => {
+        if (e.key === "Escape") { modeOverlay.remove(); window.removeEventListener("keydown", closeMode); }
+      };
+      window.addEventListener("keydown", closeMode);
     };
 
     const formatTimer = (s) => {
@@ -1453,7 +1529,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       return `${m}:${sec.toString().padStart(2, "0")}`;
     };
 
-    const runAgar = () => {
+    const runAgar = (mode) => {
+      const isSurvival = mode === "survival";
       const g = gRef.current;
       const cG = companyGroupsRef.current;
       const cN = contactDotsRef.current;
@@ -1467,6 +1544,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
       // Track alive companies
       const others = nodes.filter(n => n.type === "company" && !n.isUserCompany);
+      const bhNode = isSurvival ? others.find(n => n.name === "Unbekannt") : null;
+      const eatableCount = bhNode ? others.length - 1 : others.length;
       const eaten = new Set();
       let score = 0;
 
@@ -1498,7 +1577,12 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
       // Mark game as active and disable hover/click on company bubbles
       agarActiveRef.current = true;
-      if (cG) cG.style("pointer-events", "none");
+      agarEatenRef.current = eaten; // share eaten set with minimap
+      if (cG) {
+        cG.style("pointer-events", "none");
+        // Un-cull all companies so none are hidden from viewport culling
+        cG.style("display", null);
+      }
 
       // ── Game initial state: hide everything except company bubbles ──
       // Relationship lines + labels + hit areas
@@ -1517,12 +1601,21 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       g.selectAll(".company-text").attr("display", "none");
       // Sun corona/orbit rings
       g.selectAll(".sun-corona, .sun-corona-outer, .sun-scalable").attr("display", "none");
-      // Black hole effects
-      g.selectAll(".bh-ring").attr("display", "none");
-      g.selectAll("[filter='url(#bh-glow)']").attr("display", "none");
+      // Black hole effects — keep visible in survival mode
+      if (!isSurvival) {
+        g.selectAll(".bh-ring").attr("display", "none");
+        g.selectAll("[filter='url(#bh-glow)']").attr("display", "none");
+      }
 
       // Hide sidebar, top bar, and overlays
       window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: true } }));
+
+      // Move minimap to bottom-right corner for game mode
+      const mmCanvas = minimapRef.current;
+      if (mmCanvas) {
+        mmCanvas.style.bottom = "12px";
+        mmCanvas.style.right = "12px";
+      }
 
       // Create agar cell overlay
       const svgEl = svgRef.current;
@@ -1551,10 +1644,23 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
       // Add flee force + smooth wandering
       const sim = simulationRef.current;
+      let bhChaseSpeed = 5; // survival mode: black hole chase speed, increases over time
       if (sim) {
         sim.force("agar-flee", () => {
           others.forEach(other => {
             if (eaten.has(other.id)) return;
+            // Black hole chases the player in survival mode (only after countdown)
+            if (isSurvival && bhNode && other.id === bhNode.id && gameRunning) {
+              const dx = cellX - other.x;
+              const dy = cellY - other.y;
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              other.vx += (dx / dist) * bhChaseSpeed;
+              other.vy += (dy / dist) * bhChaseSpeed;
+              // Dampen to prevent jittering
+              other.vx *= 0.88;
+              other.vy *= 0.88;
+              return;
+            }
             // Smooth wandering: slowly rotate wander angle, apply gentle drift
             let angle = wanderAngles.get(other.id);
             angle += (Math.random() - 0.5) * 0.3;
@@ -1635,8 +1741,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         .attr("pointer-events", "none")
         .text(userNode.name);
 
-      const totalTime = 30;
-      let timeLeft = totalTime;
+      const totalTime = isSurvival ? 0 : 30;
+      let timeLeft = totalTime; // timed: counts down; survival: counts up
 
       // Fixed HUD (DOM elements pinned to viewport)
       const font = "'JetBrains Mono', monospace";
@@ -1661,7 +1767,19 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       scoreEl.textContent = "Score: 0";
       const progressEl = document.createElement("div");
       Object.assign(progressEl.style, { fontSize: "9px", fontWeight: 500, color: cc, marginTop: "2px" });
-      progressEl.textContent = `0 / ${others.length}`;
+      progressEl.textContent = `0 / ${eatableCount}`;
+      // Mode badge
+      const modeBadge = document.createElement("div");
+      Object.assign(modeBadge.style, {
+        position: "absolute", top: "16px", left: "16px",
+        background: isSurvival ? "#A855F720" : "#F59E0B20",
+        border: `1px solid ${isSurvival ? "#A855F760" : "#F59E0B60"}`,
+        borderRadius: "6px", padding: "4px 12px",
+        fontSize: "9px", fontWeight: 700, letterSpacing: "1px",
+        color: isSurvival ? "#A855F7" : "#F59E0B",
+      });
+      modeBadge.textContent = isSurvival ? "ÜBERLEBEN" : "ZEITRENNEN";
+      hudContainer.appendChild(modeBadge);
       scoreBox.appendChild(scoreEl);
       scoreBox.appendChild(progressEl);
       hudContainer.appendChild(scoreBox);
@@ -1675,7 +1793,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       });
       const timerEl = document.createElement("div");
       Object.assign(timerEl.style, { fontSize: "18px", fontWeight: 700, color: "#fff" });
-      timerEl.textContent = formatTimer(totalTime);
+      timerEl.textContent = isSurvival ? "0:00" : formatTimer(totalTime);
       timerBox.appendChild(timerEl);
       hudContainer.appendChild(timerBox);
 
@@ -1780,13 +1898,20 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         if (!gameRunning) return;
         frame++;
 
-        // Timer countdown
-        timeLeft -= 1 / 60;
-        if (frame % 3 === 0) {
-          timerEl.textContent = formatTimer(Math.max(0, timeLeft));
-          if (timeLeft <= 10) timerEl.style.color = timeLeft <= 5 ? "#EF4444" : "#F59E0B";
+        // Timer
+        if (isSurvival) {
+          timeLeft += 1 / 60;
+          if (frame % 3 === 0) timerEl.textContent = formatTimer(timeLeft);
+          // Increase black hole speed over time
+          bhChaseSpeed = 5 + timeLeft * 0.15;
+        } else {
+          timeLeft -= 1 / 60;
+          if (frame % 3 === 0) {
+            timerEl.textContent = formatTimer(Math.max(0, timeLeft));
+            if (timeLeft <= 10) timerEl.style.color = timeLeft <= 5 ? "#EF4444" : "#F59E0B";
+          }
+          if (timeLeft <= 0) { endGame(null, true); return; }
         }
-        if (timeLeft <= 0) { endGame(null, true); return; }
 
         // Follow mouse with gravity
         cellX += (mouseX - cellX) * 0.15;
@@ -1794,6 +1919,32 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
         // Smooth growth towards target radius
         cellR += (targetR - cellR) * 0.12;
+
+        // Sync black hole size with player cell in survival mode
+        if (bhNode) {
+          const bhG = cG.filter(d => d.id === bhNode.id);
+          bhG.select(".company-bubble").attr("r", cellR);
+          // Scale all effect circles proportionally
+          const bhCircles = bhG.selectAll("circle:not(.company-bubble)").nodes();
+          const bhEllipses = bhG.selectAll("ellipse").nodes();
+          const origBhR = origRadii[bhNode.id] || 20;
+          const scale = cellR / origBhR;
+          bhCircles.forEach(c => {
+            const cls = c.getAttribute("class") || "";
+            if (cls.includes("bh-ring")) d3.select(c).attr("r", origBhR * 1.6 * scale);
+            else {
+              const origR = parseFloat(c.getAttribute("data-orig-r") || c.getAttribute("r"));
+              if (!c.getAttribute("data-orig-r")) c.setAttribute("data-orig-r", origR);
+              d3.select(c).attr("r", origR * scale);
+            }
+          });
+          bhEllipses.forEach(e => {
+            const origRx = parseFloat(e.getAttribute("data-orig-rx") || e.getAttribute("rx"));
+            const origRy = parseFloat(e.getAttribute("data-orig-ry") || e.getAttribute("ry"));
+            if (!e.getAttribute("data-orig-rx")) { e.setAttribute("data-orig-rx", origRx); e.setAttribute("data-orig-ry", origRy); }
+            d3.select(e).attr("rx", origRx * scale).attr("ry", origRy * scale);
+          });
+        }
 
         // Auto-camera: directly set g transform (bypasses zoom handler = no stutter)
         const targetScale = Math.min(1.2, Math.max(0.15, (vh * 0.15) / cellR));
@@ -1803,6 +1954,12 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         camX += (targetCamX - camX) * 0.05;
         camY += (targetCamY - camY) * 0.05;
         g.attr("transform", `translate(${camX},${camY}) scale(${camScale})`);
+
+        // Update minimap with game camera
+        agarCellPosRef.current = { x: cellX, y: cellY };
+        if (frame % 3 === 0 && drawMinimapRef.current) {
+          drawMinimapRef.current({ k: camScale, x: camX, y: camY });
+        }
 
         // Keep simulation alive
         if (sim && sim.alpha() < 0.03) sim.alpha(0.08).restart();
@@ -1820,10 +1977,23 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         const fontSize = Math.min(16, Math.max(9, cellR / 3.5));
         cellLabel.attr("x", cellX).attr("y", cellY).attr("font-size", fontSize);
 
+        // Black hole collision (survival mode)
+        if (bhNode) {
+          const bhR = cellR; // synced with player size
+          const bx = bhNode.x - cellX;
+          const by = bhNode.y - cellY;
+          const bDist = Math.sqrt(bx * bx + by * by);
+          if (bDist < bhR + cellR * 0.3) {
+            endGame(null, true);
+            return;
+          }
+        }
+
         // Check collision
         for (let i = 0; i < others.length; i++) {
           const other = others[i];
           if (eaten.has(other.id)) continue;
+          if (isSurvival && other.name === "Unbekannt") continue; // can't eat the black hole
           const otherR = origRadii[other.id] || 10;
           const dx = other.x - cellX;
           const dy = other.y - cellY;
@@ -1834,7 +2004,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             eaten.add(other.id);
             score++;
             scoreEl.textContent = `Score: ${score}`;
-            progressEl.textContent = `${score} / ${others.length}`;
+            progressEl.textContent = `${score} / ${eatableCount}`;
 
             // Grow
             cellArea += Math.PI * otherR * otherR;
@@ -1887,7 +2057,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         }
 
         // Win condition
-        if (eaten.size >= others.length) {
+        if (eaten.size >= eatableCount) {
           endGame("NETZWERK DOMINIERT!", false);
           return;
         }
@@ -1931,8 +2101,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         setTimeout(() => hudContainer.remove(), 400);
 
         const endScreenDelay = (msg || isGameOver) ? 4000 : 500;
-        const pct = others.length > 0 ? Math.round((score / others.length) * 100) : 0;
-        const elapsed = Math.round(totalTime - Math.max(0, timeLeft));
+        const pct = eatableCount > 0 ? Math.round((score / eatableCount) * 100) : 0;
+        const elapsed = isSurvival ? Math.round(timeLeft) : Math.round(totalTime - Math.max(0, timeLeft));
 
         const buildEndScreen = (isVictory) => {
           // Fullscreen DOM overlay
@@ -1967,7 +2137,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             opacity: 0, marginTop: "8px", letterSpacing: "4px", textTransform: "uppercase",
             transition: "opacity 0.4s ease",
           });
-          subtitle.textContent = isVictory ? "Alle Firmen absorbiert" : "Zeit abgelaufen";
+          subtitle.textContent = isVictory ? "Alle Firmen absorbiert" : (isSurvival ? "Vom Schwarzen Loch verschlungen" : "Zeit abgelaufen");
           overlay.appendChild(subtitle);
           setTimeout(() => { subtitle.style.opacity = "0.7"; }, 400);
 
@@ -2005,7 +2175,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             stats.appendChild(col);
           };
 
-          addStat(`${score}/${others.length}`, "Firmen");
+          addStat(`${score}/${eatableCount}`, "Firmen");
           addStat(`${pct}%`, "Absorbiert");
           addStat(`${elapsed}s`, "Zeit");
 
@@ -2061,10 +2231,31 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             cG.attr("transform", d => `translate(${d.x},${d.y}) scale(1)`);
             cG.transition().duration(400).delay(() => Math.random() * 300)
               .attr("opacity", 1);
+            // Restore original bubble radii
+            cG.each(function(d) {
+              const orig = origRadii[d.id];
+              if (orig) d3.select(this).select(".company-bubble").attr("r", orig);
+            });
+            // Restore black hole effect sizes
+            if (bhNode) {
+              const bhG = cG.filter(d => d.id === bhNode.id);
+              bhG.selectAll("circle:not(.company-bubble)").each(function() {
+                const origR = this.getAttribute("data-orig-r");
+                if (origR) { this.setAttribute("r", origR); this.removeAttribute("data-orig-r"); }
+              });
+              bhG.selectAll("ellipse").each(function() {
+                const origRx = this.getAttribute("data-orig-rx");
+                const origRy = this.getAttribute("data-orig-ry");
+                if (origRx) { this.setAttribute("rx", origRx); this.removeAttribute("data-orig-rx"); }
+                if (origRy) { this.setAttribute("ry", origRy); this.removeAttribute("data-orig-ry"); }
+              });
+            }
           }
 
           // Mark game as inactive
           agarActiveRef.current = false;
+          agarCellPosRef.current = null;
+          agarEatenRef.current = null;
           // ── Restore game initial state: bring everything back ──
           // Contact dots — reset radius and opacity
           if (cN) {
@@ -2123,6 +2314,13 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
               drawMinimapRef.current(d3.zoomTransform(svgNode));
             }
           }, 500);
+
+          // Restore minimap position
+          const mmCanvas2 = minimapRef.current;
+          if (mmCanvas2) {
+            mmCanvas2.style.bottom = "85px";
+            mmCanvas2.style.right = "65px";
+          }
 
           // Restore sidebar, top bar, and overlays
           window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: false } }));

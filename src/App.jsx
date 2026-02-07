@@ -178,6 +178,7 @@ export default function App() {
   const [showCompanyText, setShowCompanyText] = useState(true);
   const [showCompanyLinks, setShowCompanyLinks] = useState(true);
   const [graphFullscreen, setGraphFullscreen] = useState(false);
+  const [canvasKey, setCanvasKey] = useState(0);
   const graphRef = useRef(null);
 
   // Listen for agar fullscreen toggle events
@@ -483,6 +484,7 @@ export default function App() {
           onShowAddContact={() => setShowAddContactModal(true)}
           onShowAddCompany={() => setShowAddCompanyModal(true)}
           onShowSettings={() => setShowSettings(true)}
+          onRefreshCanvas={() => setCanvasKey(k => k + 1)}
         />
       </div>
 
@@ -491,6 +493,7 @@ export default function App() {
         {/* Network visualization */}
         <div style={{ flex: 1, position: "relative", height: "100%" }}>
           <NetworkGraph
+              key={canvasKey}
               ref={graphRef}
               network={network}
               companyColors={companyColors}
