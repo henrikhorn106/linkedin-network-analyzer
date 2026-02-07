@@ -22,6 +22,8 @@ export function NetworkGraph({
   const nodesRef = useRef(null);
   const contactDotsRef = useRef(null);
   const gRef = useRef(null);
+  const selectedCompanyRef = useRef(null);
+  selectedCompanyRef.current = selectedCompany;
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
@@ -259,9 +261,44 @@ export function NetworkGraph({
     _link = link;
 
     // Company bubbles
+    const hoveredCompanyId = { current: null };
     const cG = g.append("g").selectAll("g").data(nodes.filter(n => n.type === "company")).join("g")
       .attr("cursor", linkingMode ? "crosshair" : "pointer")
       .on("click", (_, d) => onCompanyClick(d))
+      .on("mouseover", function(_, d) {
+        hoveredCompanyId.current = d.id;
+        const group = d3.select(this);
+        const color = companyColors[d.id] || P.accent;
+        if (d.isUserCompany) {
+          group.select(".sun-glow-bubble")
+            .transition().duration(200)
+            .attr("stroke-width", 3.5)
+            .attr("fill", `${ucColor}40`);
+        } else {
+          group.select(".company-bubble")
+            .transition().duration(200)
+            .attr("stroke-width", 2.5)
+            .attr("stroke", color + "90")
+            .attr("fill", color + "20");
+        }
+      })
+      .on("mouseout", function(_, d) {
+        hoveredCompanyId.current = null;
+        const group = d3.select(this);
+        const color = companyColors[d.id] || P.accent;
+        if (d.isUserCompany) {
+          group.select(".sun-glow-bubble")
+            .transition().duration(300)
+            .attr("stroke-width", 2.5)
+            .attr("fill", `${ucColor}30`);
+        } else {
+          group.select(".company-bubble")
+            .transition().duration(300)
+            .attr("stroke-width", 1.5)
+            .attr("stroke", color + "40")
+            .attr("fill", color + "10");
+        }
+      })
       .call(drag);
 
     const getCompanyRadius = (d) => {
@@ -316,7 +353,7 @@ export function NetworkGraph({
         : (companyColors[d.id] || P.accent) + "40")
       .attr("stroke-width", d => d.isUserCompany ? 2.5 : 1.5)
       .attr("filter", d => d.isUserCompany ? "url(#sun-glow)" : "none")
-      .attr("class", d => d.isUserCompany ? "sun-glow-bubble" : null);
+      .attr("class", d => d.isUserCompany ? "sun-glow-bubble" : "company-bubble");
 
     const formatSize = (n) => {
       if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -417,6 +454,9 @@ export function NetworkGraph({
       .attr("stroke-width", d => d.seniority >= 8 ? 1.5 : 0)
       .attr("cursor", "pointer").attr("opacity", 0.85)
       .on("mouseover", function(_, d) {
+        // When a company is selected, ignore hover on contacts from other companies
+        const sc = selectedCompanyRef.current;
+        if (sc && d.company !== sc.name) return;
         d3.select(this)
           .attr("r", contactRadius(d) * 1.8)
           .attr("opacity", 1);
@@ -426,9 +466,11 @@ export function NetworkGraph({
         setSelectedContact(d);
       })
       .on("mouseout", function(_, d) {
+        const sc = selectedCompanyRef.current;
+        if (sc && d.company !== sc.name) return;
         d3.select(this)
           .attr("r", contactRadius(d))
-          .attr("opacity", 0.85);
+          .attr("opacity", sc ? 1 : 0.85);
         // Restore zoom-based visibility
         if (currentZoomScale >= linkThreshold) {
           link.attr("display", null);
@@ -471,7 +513,10 @@ export function NetworkGraph({
         }
       });
 
-      cG.attr("transform", d => `translate(${d.x},${d.y})`);
+      cG.attr("transform", d => {
+        const s = hoveredCompanyId.current === d.id ? 1.06 : 1;
+        return `translate(${d.x},${d.y}) scale(${s})`;
+      });
       // Only update contact dot positions when they're visible
       if (currentZoomScale >= contactThreshold) {
         cN.attr("cx", d => d.x).attr("cy", d => d.y);
