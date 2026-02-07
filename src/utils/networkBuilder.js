@@ -101,7 +101,7 @@ export function calculateSeniority(position) {
  * @param {string} industryFilter - Industry to filter by ("all" = no filter)
  * @param {Array} companyRelationships - Company-to-company relationships [{source, target, type}]
  */
-export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = []) {
+export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = [], companyEnrichments = {}) {
   // Group contacts by company (case-insensitive, preserving first-seen casing)
   const companyMap = {};
   const companyCanonical = {}; // lowercase -> first-seen casing
@@ -133,8 +133,9 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
   // Create company nodes with estimated sizes and industry
   const companyNodes = Object.entries(filteredCompanyMap)
     .map(([name, members]) => {
+      const enrichedSize = companyEnrichments[name]?.estimated_size;
       const customSize = members.find(m => m.customEstimatedSize)?.customEstimatedSize;
-      const estimatedSize = customSize || estimateCompanySize(name, members);
+      const estimatedSize = enrichedSize || customSize || estimateCompanySize(name, members);
       const isUserCompany = userCompany && name.toLowerCase() === userCompany.toLowerCase();
       const industry = inferIndustry(name, members);
       return {

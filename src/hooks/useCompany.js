@@ -65,6 +65,20 @@ export function useCompany(userId) {
     setCompany(null);
   }, [company]);
 
+  // Get all company enrichments as a map { name: row }
+  const getAllCompanyEnrichments = useCallback(() => {
+    if (!isInitialized || !userId) return {};
+    try {
+      const rows = query('SELECT * FROM companies WHERE user_id = ?', [userId]);
+      const map = {};
+      rows.forEach(r => { map[r.name] = r; });
+      return map;
+    } catch (err) {
+      console.error('Failed to get all company enrichments:', err);
+      return {};
+    }
+  }, [isInitialized, userId]);
+
   // Get enrichment data for any company by name
   const getCompanyEnrichment = useCallback((companyName) => {
     if (!isInitialized || !userId) return null;
@@ -151,6 +165,7 @@ export function useCompany(userId) {
     deleteCompany,
     reloadCompany: loadCompany,
     getCompanyEnrichment,
+    getAllCompanyEnrichments,
     saveCompanyEnrichment,
   };
 }

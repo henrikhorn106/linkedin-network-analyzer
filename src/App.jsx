@@ -128,7 +128,7 @@ export default function App() {
 
   // User & Company hooks
   const { user, isLoading: userLoading, deleteUser } = useUser();
-  const { company, updateCompany, deleteCompany, getCompanyEnrichment, saveCompanyEnrichment } = useCompany(user?.id);
+  const { company, updateCompany, deleteCompany, getCompanyEnrichment, getAllCompanyEnrichments, saveCompanyEnrichment } = useCompany(user?.id);
 
   // Contacts hook with userId
   const {
@@ -191,10 +191,13 @@ export default function App() {
     });
   }, [contacts, seniorityFilter, company?.name]);
 
+  // Get all enrichment data for companies
+  const companyEnrichments = useMemo(() => getAllCompanyEnrichments(), [getAllCompanyEnrichments, contacts]);
+
   // Build network (pass user's company to always show it centered)
   const network = useMemo(() =>
-    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships),
-    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships]
+    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments),
+    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments]
   );
 
   // Top influencers

@@ -69,6 +69,7 @@ export function Sidebar({
   const [enrichment, setEnrichment] = useState(null);
   const [isEnriching, setIsEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState(null);
+  const [suggestedSize, setSuggestedSize] = useState(null);
 
   // Load enrichment when company changes
   useEffect(() => {
@@ -79,6 +80,7 @@ export function Sidebar({
       setEnrichment(null);
     }
     setEnrichError(null);
+    setSuggestedSize(null);
   }, [selectedCompany?.name, getCompanyEnrichment]);
 
   const handleEnrich = async () => {
@@ -122,6 +124,12 @@ export function Sidebar({
       const result = await enrichCompanyWithAI(selectedCompany.name, context, apiKey);
       const saved = await saveCompanyEnrichment(selectedCompany.name, result);
       setEnrichment(saved);
+
+      // Always prompt user with AI's employee count suggestion
+      const aiSize = result.estimated_size ? Number(result.estimated_size) : null;
+      if (aiSize) {
+        setSuggestedSize(aiSize);
+      }
     } catch (err) {
       console.error('Enrichment failed:', err);
       setEnrichError('Anreicherung fehlgeschlagen. Bitte versuche es erneut.');
@@ -487,6 +495,47 @@ export function Sidebar({
               {enrichError && (
                 <div style={{ fontSize: 8, color: P.red, marginTop: 4 }}>
                   {enrichError}
+                </div>
+              )}
+
+              {/* Suggested size prompt */}
+              {suggestedSize && (
+                <div style={{
+                  marginTop: 8, padding: 10, background: P.accent + "10",
+                  borderRadius: 6, border: `1px solid ${P.accent}30`,
+                }}>
+                  <div style={{ fontSize: 9, color: P.text, marginBottom: 6 }}>
+                    KI schlägt <span style={{ fontWeight: 700, color: P.accent }}>{suggestedSize.toLocaleString('de-DE')}</span> Mitarbeiter vor
+                    <span style={{ color: P.textDim }}> (aktuell: {selectedCompany.estimatedSize?.toLocaleString('de-DE') || '?'})</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={async () => {
+                        await renameCompany(selectedCompany.name, selectedCompany.name, suggestedSize);
+                        setSelectedCompany(prev => prev ? { ...prev, estimatedSize: suggestedSize } : null);
+                        setSuggestedSize(null);
+                      }}
+                      style={{
+                        flex: 1, padding: "5px 0",
+                        background: P.accent, border: "none", borderRadius: 4,
+                        color: "#000", fontSize: 9, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit",
+                      }}
+                    >
+                      ÜBERNEHMEN
+                    </button>
+                    <button
+                      onClick={() => setSuggestedSize(null)}
+                      style={{
+                        flex: 1, padding: "5px 0",
+                        background: "transparent", border: `1px solid ${P.border}`,
+                        borderRadius: 4, color: P.textDim, fontSize: 9,
+                        cursor: "pointer", fontFamily: "inherit",
+                      }}
+                    >
+                      IGNORIEREN
+                    </button>
+                  </div>
                 </div>
               )}
             </>

@@ -204,7 +204,64 @@ export async function enrichCompanyWithAI(companyName, context, apiKey) {
     if (currentIndustry) existingData += `\n- Branche (vermutet): ${currentIndustry}`;
   }
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const enrichmentSchema = {
+    type: 'object',
+    properties: {
+      description: {
+        type: 'string',
+        description: 'Präzise Beschreibung (2-3 Sätze): Was macht die Firma, Kernprodukte/Services, Zielmarkt',
+      },
+      industry: {
+        type: 'string',
+        enum: ['Technologie', 'Finanzdienstleistungen', 'Beratung', 'Marketing & Werbung', 'E-Commerce', 'Gesundheitswesen', 'Bildung', 'Produktion', 'Immobilien', 'Sonstiges'],
+        description: 'Branche der Firma',
+      },
+      website: {
+        type: 'string',
+        description: 'Offizielle Website URL (z.B. https://firmenname.com)',
+      },
+      headquarters: {
+        type: 'string',
+        description: 'Hauptsitz im Format: Stadt, Land (z.B. Berlin, Deutschland oder San Francisco, USA). Immer den deutschen Ländernamen verwenden.',
+      },
+      founded_year: {
+        type: 'integer',
+        description: 'Gründungsjahr der Firma',
+      },
+      company_type: {
+        type: 'string',
+        enum: ['Enterprise', 'Startup', 'Mittelstand', 'Agentur', 'Beratung', 'Konzern'],
+        description: 'Firmentyp',
+      },
+      linkedin_url: {
+        type: 'string',
+        description: 'LinkedIn Firmenprofil URL',
+      },
+      estimated_size: {
+        type: 'integer',
+        description: 'Geschätzte Mitarbeiterzahl',
+      },
+    },
+    required: ['description', 'industry', 'website', 'headquarters', 'founded_year', 'company_type', 'linkedin_url', 'estimated_size'],
+    additionalProperties: false,
+  };
+
+  const systemPrompt = `Du bist ein erstklassiger Business-Intelligence-Analyst. Du erhältst umfangreiche Kontextdaten über eine Firma aus einem LinkedIn-Netzwerk und sollst möglichst präzise Firmendaten zusammenstellen.
+
+WICHTIG: Nutze die Websuche um aktuelle, echte Daten über die Firma zu finden (Website, Hauptsitz, Gründungsjahr, Mitarbeiterzahl, LinkedIn-Profil).
+Nutze die Kontaktpositionen, um auf die Firmenstruktur und -größe zu schließen.
+Nutze Geschäftsbeziehungen, um den Marktkontext zu verstehen.
+
+Regeln:
+- Suche im Web nach der Firma und nutze die echten Daten
+- Jedes Feld MUSS einen Wert haben. Mache immer eine bestmögliche Schätzung.
+- estimated_size soll realistisch sein: Startup 5-50, Mittelstand 50-500, Enterprise 500+
+- Bevorzuge echte, verifizierte Daten aus der Websuche über Schätzungen`;
+
+  const userPrompt = `Recherchiere die Firma "${companyName}" im Web und fülle alle Felder mit echten Daten.${existingData}${contactSection}${relationshipSection}${userContext}`;
+
+  // Use Responses API with web search + structured output
+  const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -212,58 +269,36 @@ export async function enrichCompanyWithAI(companyName, context, apiKey) {
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `Du bist ein erstklassiger Business-Intelligence-Analyst. Du erhältst umfangreiche Kontextdaten über eine Firma aus einem LinkedIn-Netzwerk und sollst möglichst präzise Firmendaten zusammenstellen.
-
-Nutze die Kontaktpositionen, um auf die Firmenstruktur und -größe zu schließen.
-Nutze Geschäftsbeziehungen, um den Marktkontext zu verstehen.
-Nutze die Positionsverteilung, um die Branche und den Firmentyp einzugrenzen.
-
-Antworte NUR mit validem JSON. Jedes Feld MUSS einen Wert haben, NIEMALS null:
-{
-  "description": "Präzise Beschreibung (2-3 Sätze): Was macht die Firma, Kernprodukte/Services, Zielmarkt",
-  "industry": "Eine der folgenden: Technologie, Finanzdienstleistungen, Beratung, Marketing & Werbung, E-Commerce, Gesundheitswesen, Bildung, Produktion, Immobilien, Sonstiges",
-  "website": "https://firmenname.com (bestmögliche URL)",
-  "headquarters": "Stadt, Land",
-  "founded_year": 2010,
-  "company_type": "Enterprise/Startup/Mittelstand/Agentur/Beratung/Konzern",
-  "linkedin_url": "https://linkedin.com/company/firmenname",
-  "estimated_size": 500
-}
-
-Regeln:
-- Nutze dein Wissen UND die bereitgestellten Kontextdaten
-- Wenn viele Senior-Positionen vorhanden sind, ist die Firma wahrscheinlich größer
-- Wenn die Positionsverteilung auf Entwickler/Engineers hindeutet → Technologie
-- Wenn Sales/Account-Manager dominieren → möglicherweise B2B/Beratung
-- WICHTIG: Gib NIEMALS null zurück. Jedes Feld MUSS einen Wert haben. Mache immer eine bestmögliche Schätzung basierend auf dem Kontext.
-- estimated_size soll realistisch sein: Startup 5-50, Mittelstand 50-500, Enterprise 500+
-- Wenn du die Website nicht kennst, konstruiere eine plausible URL (z.B. https://firmenname.com)
-- Wenn du das Gründungsjahr nicht kennst, schätze es basierend auf Firmengröße und Branche`
+      instructions: systemPrompt,
+      input: userPrompt,
+      tools: [{ type: 'web_search_preview' }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'company_enrichment',
+          strict: true,
+          schema: enrichmentSchema,
         },
-        {
-          role: 'user',
-          content: `Firma: ${companyName}${existingData}${contactSection}${relationshipSection}${userContext}`
-        }
-      ],
+      },
       temperature: 0.3,
     }),
   });
 
   if (!response.ok) {
-    throw new Error('API request failed');
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || 'API request failed');
   }
 
   const data = await response.json();
-  const content = data.choices[0]?.message?.content || '{}';
 
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    return JSON.parse(jsonMatch[0]);
+  // Responses API returns output array — find the text output item
+  const textOutput = data.output?.find(item => item.type === 'message');
+  const content = textOutput?.content?.find(c => c.type === 'output_text')?.text;
+
+  if (content) {
+    return JSON.parse(content);
   }
-  throw new Error('Could not parse AI response');
+  throw new Error('Empty response from AI');
 }
 
 /**
