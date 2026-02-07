@@ -122,6 +122,32 @@ export async function initDatabase() {
       db.run('ALTER TABLE companies ADD COLUMN enriched_at TEXT');
       await persistDatabase();
     }
+    // Migration: add created_at column to company_relationships if missing
+    try {
+      db.exec('SELECT created_at FROM company_relationships LIMIT 0');
+    } catch (e) {
+      db.run('ALTER TABLE company_relationships ADD COLUMN created_at TEXT');
+      await persistDatabase();
+    }
+    // Migration: strip "company_" prefix from source_company / target_company
+    try {
+      db.run("UPDATE company_relationships SET source_company = SUBSTR(source_company, 9) WHERE source_company LIKE 'company_%'");
+      db.run("UPDATE company_relationships SET target_company = SUBSTR(target_company, 9) WHERE target_company LIKE 'company_%'");
+      await persistDatabase();
+    } catch (e) {
+      console.warn('[DB Migration] Strip company_ prefix skipped:', e.message);
+    }
+    // Migration: convert supplier relationships to customer with swapped direction
+    try {
+      db.run(`UPDATE company_relationships
+        SET source_company = target_company,
+            target_company = source_company,
+            relationship_type = 'customer'
+        WHERE relationship_type = 'supplier'`);
+      await persistDatabase();
+    } catch (e) {
+      console.warn('[DB Migration] Supplier→customer conversion skipped:', e.message);
+    }
   } else {
     db = new SQL.Database();
     // Create tables

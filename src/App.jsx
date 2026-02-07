@@ -148,7 +148,7 @@ export default function App() {
   const {
     relationships: companyRelationships,
     addRelationship,
-    deleteRelationshipByIndex,
+    deleteRelationship,
   } = useCompanyRelationships(user?.id);
 
   // UI State
@@ -323,9 +323,6 @@ export default function App() {
     }
   }, [dbSetAllContacts, deleteCompany, deleteUser, resetToOnboarding]);
 
-  const deleteRelationship = useCallback((index) => {
-    deleteRelationshipByIndex(index);
-  }, [deleteRelationshipByIndex]);
 
   // Show loading screen while database initializes
   if (dbLoading || userLoading) {

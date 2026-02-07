@@ -2,6 +2,9 @@ import { useState, useCallback, useEffect } from 'react';
 import { query, execute, lastInsertRowId } from '../db/database';
 import { useDatabase } from '../contexts/DatabaseContext';
 
+const stripPrefix = (name) => name?.startsWith('company_') ? name.slice(8) : name;
+const addPrefix = (name) => name ? `company_${name}` : name;
+
 /**
  * Hook for managing company-to-company relationships with SQLite persistence
  */
@@ -20,8 +23,8 @@ export function useCompanyRelationships(userId) {
       );
       const rels = rows.map(row => ({
         id: row.id,
-        source: row.source_company,
-        target: row.target_company,
+        source: addPrefix(row.source_company),
+        target: addPrefix(row.target_company),
         type: row.relationship_type,
       }));
       setRelationships(rels);
@@ -43,19 +46,35 @@ export function useCompanyRelationships(userId) {
     }
   }, [isInitialized, userId, loadRelationships]);
 
-  // Add a new relationship
+  // Add a new relationship (with duplicate prevention)
   const addRelationship = useCallback(async (relationship) => {
     if (!userId) return;
 
+    const cleanSource = stripPrefix(relationship.source);
+    const cleanTarget = stripPrefix(relationship.target);
+
+    // Check for duplicate
+    const existing = query(
+      `SELECT id FROM company_relationships
+       WHERE user_id = ? AND source_company = ? AND target_company = ? AND relationship_type = ?`,
+      [userId, cleanSource, cleanTarget, relationship.type]
+    );
+    if (existing.length > 0) return existing[0];
+
     try {
       await execute(
-        `INSERT INTO company_relationships (user_id, source_company, target_company, relationship_type)
-         VALUES (?, ?, ?, ?)`,
-        [userId, relationship.source, relationship.target, relationship.type]
+        `INSERT INTO company_relationships (user_id, source_company, target_company, relationship_type, created_at)
+         VALUES (?, ?, ?, ?, datetime('now'))`,
+        [userId, cleanSource, cleanTarget, relationship.type]
       );
       const id = lastInsertRowId('company_relationships');
 
-      const newRel = { ...relationship, id };
+      const newRel = {
+        id,
+        source: addPrefix(cleanSource),
+        target: addPrefix(cleanTarget),
+        type: relationship.type,
+      };
       setRelationships(prev => [...prev, newRel]);
       return newRel;
     } catch (err) {
@@ -63,25 +82,6 @@ export function useCompanyRelationships(userId) {
       throw err;
     }
   }, [userId]);
-
-  // Delete a relationship by index (for compatibility with existing code)
-  const deleteRelationshipByIndex = useCallback(async (index) => {
-    if (!userId) return;
-
-    try {
-      const rel = relationships[index];
-      if (rel) {
-        await execute(
-          'DELETE FROM company_relationships WHERE id = ? AND user_id = ?',
-          [rel.id, userId]
-        );
-        setRelationships(prev => prev.filter((_, i) => i !== index));
-      }
-    } catch (err) {
-      console.error('Failed to delete relationship:', err);
-      throw err;
-    }
-  }, [userId, relationships]);
 
   // Delete a relationship by id
   const deleteRelationship = useCallback(async (relId) => {
@@ -117,7 +117,6 @@ export function useCompanyRelationships(userId) {
     isLoading,
     addRelationship,
     deleteRelationship,
-    deleteRelationshipByIndex,
     clearRelationships,
     reloadRelationships: loadRelationships,
   };

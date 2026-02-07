@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS company_relationships (
   source_company TEXT NOT NULL,
   target_company TEXT NOT NULL,
   relationship_type TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

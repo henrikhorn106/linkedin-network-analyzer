@@ -76,7 +76,6 @@ export function NetworkGraph({
     // Arrow markers for company-to-company links
     const arrowTypes = {
       customer: { color: "#00E5A0", bidir: false },
-      supplier: { color: "#F59E0B", bidir: false },
       partner: { color: "#8B5CF6", bidir: true },
       investor: { color: "#3B82F6", bidir: false },
       competitor: { color: "#EF4444", bidir: true },

@@ -604,11 +604,11 @@ export function Sidebar({
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ color: info.color }}>{info.icon}</span>
-                      <span style={{ color: P.text }}>{isSource ? info.label + " von" : info.label + " für"}</span>
+                      <span style={{ color: P.text }}>{isSource ? (info.label + " von") : ((info.reverseLabel || info.label) + " für")}</span>
                       <span style={{ color: info.color, fontWeight: 600 }}>{otherCompany?.name || "Unknown"}</span>
                     </div>
                     <button
-                      onClick={() => onDeleteRelationship(idx)}
+                      onClick={() => onDeleteRelationship(rel.id)}
                       style={{
                         background: "transparent",
                         border: "none",
