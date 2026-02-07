@@ -81,7 +81,7 @@ export function parseLinkedInCSV(csvText) {
 
     if (!name) continue;
 
-    const company = columnMap.company >= 0 ? values[columnMap.company]?.trim() || 'Unknown' : 'Unknown';
+    const company = columnMap.company >= 0 ? values[columnMap.company]?.trim() || 'Unbekannt' : 'Unbekannt';
     const position = columnMap.position >= 0 ? values[columnMap.position]?.trim() || 'Connection' : 'Connection';
     const connectedOn = columnMap.connectedOn >= 0 ? values[columnMap.connectedOn]?.trim() || '' : '';
     const linkedinUrl = columnMap.url >= 0 ? values[columnMap.url]?.trim() || '' : '';

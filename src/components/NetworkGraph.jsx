@@ -8,6 +8,7 @@ export function NetworkGraph({
   companyColors,
   showCompanyLinks,
   allCompanyLinks,
+  dimRelationships,
   linkingMode,
   onCompanyClick,
   onContactClick,
@@ -151,8 +152,8 @@ export function NetworkGraph({
     zoomRef.current = zoom;
 
     const allNodes = [
-      ...network.companyNodes.filter(n => n.name !== "Unknown"),
-      ...network.contactNodes.filter(n => n.company !== "Unknown")
+      ...network.companyNodes,
+      ...network.contactNodes
     ];
     const idSet = new Set(allNodes.map(n => n.id));
     const allLinks = network.links.filter(l => {
@@ -431,7 +432,7 @@ export function NetworkGraph({
       .attr("font-weight", d => d.isUserCompany ? 700 : 600)
       .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none");
 
-    cG.append("text").text(d => formatSize(d.estimatedSize || 0))
+    cG.append("text").text(d => d.name === "Unbekannt" ? "" : formatSize(d.estimatedSize || 0))
       .attr("text-anchor", "middle").attr("dy", "1em")
       .attr("fill", P.textMuted)
       .attr("font-size", d => {
@@ -441,7 +442,7 @@ export function NetworkGraph({
       .attr("font-weight", 700)
       .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none");
 
-    cG.append("text").text(d => d.isUserCompany ? "MEINE FIRMA" : `${d.memberCount} conn.`)
+    cG.append("text").text(d => d.isUserCompany ? "MEINE FIRMA" : (d.name === "Unbekannt" ? `${d.memberCount} Kontakte` : `${d.memberCount} conn.`))
       .attr("text-anchor", "middle").attr("dy", "2.2em")
       .attr("fill", d => d.isUserCompany ? ucColor + "80" : P.textDim)
       .attr("font-size", d => d.isUserCompany ? 8 : 6)
@@ -637,17 +638,18 @@ export function NetworkGraph({
       // Reset all contact dots and company bubbles to normal
       cN.attr("opacity", 0.85);
       if (cG) cG.transition().duration(300).attr("opacity", 1);
-      if (cLinks) cLinks.transition().duration(300).attr("stroke-opacity", d => d.type === "inferred" ? 0.3 : 0.6);
+      if (cLinks) cLinks.transition().duration(300).attr("opacity", 1);
       return;
     }
 
     const companyName = selectedCompany.name;
     const selectedId = selectedCompany.id;
 
-    // Build set of directly connected company IDs
+    // Build set of directly connected company IDs using full (unfiltered) relationships
+    // so dimming works correctly even when the link-type filter is set to "none"
     const connectedIds = new Set();
     connectedIds.add(selectedId);
-    allCompanyLinks.forEach(l => {
+    (dimRelationships || allCompanyLinks).forEach(l => {
       const sId = typeof l.source === "object" ? l.source.id : l.source;
       const tId = typeof l.target === "object" ? l.target.id : l.target;
       if (sId === selectedId) connectedIds.add(tId);
@@ -671,14 +673,14 @@ export function NetworkGraph({
         .attr("opacity", d => d.isUserCompany || connectedIds.has(d.id) ? 1 : 0.12);
     }
 
-    // Dim company-to-company links that don't involve the selected company
+    // Dim company-to-company links (and their arrow markers) that don't involve the selected company
     if (cLinks) {
       cLinks.transition().duration(300)
-        .attr("stroke-opacity", d => {
+        .attr("opacity", d => {
           const sId = typeof d.source === "object" ? d.source.id : d.source;
           const tId = typeof d.target === "object" ? d.target.id : d.target;
-          if (sId === selectedId || tId === selectedId) return d.type === "inferred" ? 0.4 : 0.8;
-          return 0.05;
+          if (sId === selectedId || tId === selectedId) return 1;
+          return 0.07;
         });
     }
 
@@ -763,7 +765,7 @@ export function NetworkGraph({
         simulationRef.current.on("tick.highlight", null);
       }
     };
-  }, [selectedCompany, companyColors, allCompanyLinks]);
+  }, [selectedCompany, companyColors, dimRelationships, allCompanyLinks]);
 
   // Easter egg: double-click your company → agar.io mode
   useEffect(() => {

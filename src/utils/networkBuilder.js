@@ -106,7 +106,8 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
   const companyMap = {};
   const companyCanonical = {}; // lowercase -> first-seen casing
   contacts.forEach(c => {
-    const raw = c.company?.trim() || "Unknown";
+    const rawVal = c.company?.trim();
+    const raw = (!rawVal || rawVal === "Unknown") ? "Unbekannt" : rawVal;
     const key = raw.toLowerCase();
     if (!companyCanonical[key]) companyCanonical[key] = raw;
     const co = companyCanonical[key];
@@ -119,7 +120,7 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
   Object.entries(companyMap).forEach(([name, members]) => {
     const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
     const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
-    if ((members.length >= minCompanySize || isUserCompany || isFocused) && name !== "Unknown") {
+    if (members.length >= minCompanySize || isUserCompany || isFocused) {
       filteredCompanyMap[name] = members;
     }
   });
@@ -170,20 +171,27 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     companyLinkCounts[tgt] = (companyLinkCounts[tgt] || 0) + 1;
   });
 
+  const normalizeCompany = (name) => {
+    const trimmed = name?.trim();
+    return (!trimmed || trimmed === "Unknown") ? "Unbekannt" : trimmed;
+  };
+
   const contactNodes = contacts
-    .filter(c => includedCompanies.has(c.company?.trim()))
+    .filter(c => includedCompanies.has(normalizeCompany(c.company)))
     .map(c => {
+      const co = normalizeCompany(c.company);
       const seniority = calculateSeniority(c.position);
-      const companyMembers = filteredCompanyMap[c.company]?.length || 1;
-      const estimatedSize = companySizeMap[c.company] || 100;
-      const companyLinkCount = companyLinkCounts[c.company?.trim()] || 0;
+      const companyMembers = filteredCompanyMap[co]?.length || 1;
+      const estimatedSize = companySizeMap[co] || 100;
+      const companyLinkCount = companyLinkCounts[co] || 0;
       const influenceScore = calculateInfluence(c, seniority, companyMembers, estimatedSize, companyLinkCount);
       const isUser = typeof c.id === 'string' && c.id.startsWith('user_');
 
       return {
         ...c,
+        company: co,
         type: "contact",
-        companyId: `company_${c.company?.trim() || "Unknown"}`,
+        companyId: `company_${co}`,
         seniority,
         influenceScore,
         isUser,
@@ -198,7 +206,6 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
 
   // Create links between contacts and their companies
   const links = contactNodes
-    .filter(c => c.company !== "Unknown")
     .map(c => ({
       source: c.id,
       target: c.companyId,
@@ -233,7 +240,7 @@ export function inferCompanyConnections(contacts, companyNodes, minSharedContact
   const companyContacts = {};
   contacts.forEach(c => {
     const co = c.company?.trim();
-    if (!co || co === "Unknown") return;
+    if (!co || co === "Unbekannt" || co === "Unknown") return;
     if (!companyContacts[co]) companyContacts[co] = [];
     companyContacts[co].push(c);
   });

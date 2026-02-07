@@ -37,7 +37,7 @@ export function FilterControls({
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 9, color: P.textDim }}>Min. Firmen:</span>
+        <span style={{ fontSize: 9, color: P.textDim }}>Min. Kontakte:</span>
         <select
           value={minCompanySize}
           onChange={(e) => setMinCompanySize(parseInt(e.target.value))}
@@ -115,9 +115,9 @@ export function FilterControls({
           fontFamily: "inherit",
           whiteSpace: "nowrap",
         }}
-        title="Bei Klick auf Firma nur verbundene Firmen anzeigen"
+        title="Verbundene Firmen immer anzeigen (Filter umgehen)"
       >
-        Fokus
+        Direkt
       </button>
 
       {totalContacts !== filteredContacts && (

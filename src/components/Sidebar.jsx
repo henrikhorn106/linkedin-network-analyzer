@@ -52,7 +52,14 @@ export function Sidebar({
     return n;
   };
 
-  // Edit state for company detail view
+  // Tab state
+  const [sidebarTab, setSidebarTab] = useState("influencer");
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [minInfluenceScore, setMinInfluenceScore] = useState(0);
+  const [maxInfluenceScore, setMaxInfluenceScore] = useState(100);
+  const [firmenMinContacts, setFirmenMinContacts] = useState(1);
+  const [firmenMaxContacts, setFirmenMaxContacts] = useState(Infinity);
+  const [companyTab, setCompanyTab] = useState("info");
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editSize, setEditSize] = useState('');
@@ -132,6 +139,7 @@ export function Sidebar({
   };
 
   const isUserCompany = selectedCompany && userCompany && selectedCompany.name === userCompany.name;
+  const isUnknownCompany = selectedCompany && selectedCompany.name === "Unbekannt";
 
   const startEditing = () => {
     setEditName(selectedCompany.name);
@@ -204,7 +212,7 @@ export function Sidebar({
             >
               ← ZURÜCK
             </button>
-            {!isEditing && (
+            {!isEditing && !isUnknownCompany && (
               <button
                 onClick={startEditing}
                 style={{
@@ -376,575 +384,846 @@ export function Sidebar({
               </div>
 
               <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5" }}>
-                {selectedCompany.name}
+                {isUnknownCompany ? "Unbekannt" : selectedCompany.name}
               </div>
               <div style={{ fontSize: 11, color: companyColors[selectedCompany.id], marginTop: 3 }}>
-                {selectedCompany.memberCount} Kontakte in deinem Netzwerk
+                {isUnknownCompany
+                  ? `${selectedCompany.memberCount} Kontakte ohne Firma`
+                  : `${selectedCompany.memberCount} Kontakte in deinem Netzwerk`}
               </div>
-              <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ color: P.textDim }}>Geschätzte Firmengröße:</span>
-                <span style={{ color: P.text, fontWeight: 600 }}>
-                  {selectedCompany.estimatedSize?.toLocaleString('de-DE')} Mitarbeiter
-                </span>
-              </div>
-              {/* Show industry from enrichment or user company */}
-              {(enrichment?.industry || (isUserCompany && userCompany.industry)) && (
-                <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ color: P.textDim }}>Branche:</span>
-                  <span style={{ color: P.text, fontWeight: 600 }}>
-                    {enrichment?.industry || userCompany?.industry}
-                  </span>
-                </div>
-              )}
 
-              {/* Enrichment data */}
-              {enrichment?.enriched_at && (
-                <div style={{
-                  marginTop: 10, padding: 10, background: P.bg,
-                  borderRadius: 7, border: `1px solid ${P.border}`,
-                }}>
-                  {enrichment.description && (
-                    <div style={{ fontSize: 10, color: P.text, lineHeight: 1.5, marginBottom: 8 }}>
-                      {enrichment.description}
+              {/* Tab bar */}
+              {!isUnknownCompany && <div style={{
+                display: "flex", gap: 0, marginTop: 14, marginBottom: 14,
+                borderBottom: `1px solid ${P.border}`,
+              }}>
+                {[
+                  { key: "info", label: "Info" },
+                  { key: "links", label: "Links", count: companyRelationships.filter(r => {
+                    if (r.source !== selectedCompany.id && r.target !== selectedCompany.id) return false;
+                    const otherId = r.source === selectedCompany.id ? r.target : r.source;
+                    return companyNodes.some(c => c.id === otherId);
+                  }).length },
+                  { key: "kontakte", label: "Kontakte", count: (selectedCompany.members || []).length },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setCompanyTab(tab.key)}
+                    style={{
+                      flex: 1,
+                      padding: "7px 0",
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: companyTab === tab.key ? `2px solid ${P.accent}` : "2px solid transparent",
+                      color: companyTab === tab.key ? P.accent : P.textDim,
+                      fontSize: 9,
+                      fontWeight: companyTab === tab.key ? 700 : 500,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      letterSpacing: "0.5px",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {tab.label}{tab.count != null ? ` (${tab.count})` : ""}
+                  </button>
+                ))}
+              </div>}
+
+              {/* === Info Tab === */}
+              {!isUnknownCompany && companyTab === "info" && (
+                <>
+                  <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: P.textDim }}>Geschätzte Firmengröße:</span>
+                    <span style={{ color: P.text, fontWeight: 600 }}>
+                      {selectedCompany.estimatedSize?.toLocaleString('de-DE')} Mitarbeiter
+                    </span>
+                  </div>
+                  {(enrichment?.industry || (isUserCompany && userCompany.industry)) && (
+                    <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ color: P.textDim }}>Branche:</span>
+                      <span style={{ color: P.text, fontWeight: 600 }}>
+                        {enrichment?.industry || userCompany?.industry}
+                      </span>
                     </div>
                   )}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {enrichment.company_type && (
-                      <span style={{
-                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
-                        background: P.purple + "15", color: P.purple, fontWeight: 600,
+
+                  {enrichment?.enriched_at && (
+                    <div style={{
+                      marginTop: 10, padding: 10, background: P.bg,
+                      borderRadius: 7, border: `1px solid ${P.border}`,
+                    }}>
+                      {enrichment.description && (
+                        <div style={{ fontSize: 10, color: P.text, lineHeight: 1.5, marginBottom: 8 }}>
+                          {enrichment.description}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {enrichment.company_type && (
+                          <span style={{
+                            fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                            background: P.purple + "15", color: P.purple, fontWeight: 600,
+                          }}>
+                            {enrichment.company_type}
+                          </span>
+                        )}
+                        {enrichment.headquarters && (
+                          <span style={{
+                            fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                            background: P.blue + "15", color: P.blue, fontWeight: 600,
+                          }}>
+                            📍 {enrichment.headquarters}
+                          </span>
+                        )}
+                        {enrichment.founded_year && (
+                          <span style={{
+                            fontSize: 8, padding: "3px 7px", borderRadius: 10,
+                            background: P.orange + "15", color: P.orange, fontWeight: 600,
+                          }}>
+                            Gegr. {enrichment.founded_year}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                        {enrichment.website && (
+                          <a
+                            href={enrichment.website}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: 8, color: P.accent, textDecoration: "none", fontWeight: 600,
+                            }}
+                          >
+                            Website ↗
+                          </a>
+                        )}
+                        {enrichment.linkedin_url && (
+                          <a
+                            href={enrichment.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: 8, color: "#0A66C2", textDecoration: "none", fontWeight: 600,
+                            }}
+                          >
+                            LinkedIn ↗
+                          </a>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 7, color: P.textDim, marginTop: 6 }}>
+                        Angereichert: {new Date(enrichment.enriched_at).toLocaleDateString('de-DE')}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleEnrich}
+                    disabled={isEnriching}
+                    style={{
+                      width: "100%", marginTop: 10, padding: "7px 0",
+                      background: isEnriching ? P.border : (enrichment?.enriched_at ? P.bg : P.purple + "15"),
+                      border: `1px solid ${enrichment?.enriched_at ? P.border : P.purple + "40"}`,
+                      borderRadius: 6,
+                      color: isEnriching ? P.textDim : (enrichment?.enriched_at ? P.textMuted : P.purple),
+                      fontSize: 9, fontWeight: 600,
+                      cursor: isEnriching ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      letterSpacing: "0.5px",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {isEnriching ? "WIRD ANGEREICHERT..." : (enrichment?.enriched_at ? "ERNEUT ANREICHERN" : "MIT KI ANREICHERN")}
+                  </button>
+                  {enrichError && (
+                    <div style={{ fontSize: 8, color: P.red, marginTop: 4 }}>
+                      {enrichError}
+                    </div>
+                  )}
+
+                  {pendingEnrichment && (() => {
+                    const inputStyle = {
+                      width: "100%", padding: "5px 8px", background: P.bg,
+                      border: `1px solid ${P.border}`, borderRadius: 4,
+                      color: P.text, fontSize: 10, fontFamily: "inherit",
+                      outline: "none", boxSizing: "border-box",
+                    };
+                    const labelStyle = { fontSize: 8, color: P.textDim, marginBottom: 2, letterSpacing: "0.3px" };
+                    const fieldStyle = { marginBottom: 6 };
+                    const update = (key, val) => setPendingEnrichment(prev => ({ ...prev, [key]: val }));
+                    return (
+                      <div style={{
+                        marginTop: 8, padding: 10, background: P.purple + "08",
+                        borderRadius: 6, border: `1px solid ${P.purple}30`,
                       }}>
-                        {enrichment.company_type}
-                      </span>
-                    )}
-                    {enrichment.headquarters && (
-                      <span style={{
-                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
-                        background: P.blue + "15", color: P.blue, fontWeight: 600,
-                      }}>
-                        📍 {enrichment.headquarters}
-                      </span>
-                    )}
-                    {enrichment.founded_year && (
-                      <span style={{
-                        fontSize: 8, padding: "3px 7px", borderRadius: 10,
-                        background: P.orange + "15", color: P.orange, fontWeight: 600,
-                      }}>
-                        Gegr. {enrichment.founded_year}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    {enrichment.website && (
-                      <a
-                        href={enrichment.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          fontSize: 8, color: P.accent, textDecoration: "none", fontWeight: 600,
-                        }}
-                      >
-                        Website ↗
-                      </a>
-                    )}
-                    {enrichment.linkedin_url && (
-                      <a
-                        href={enrichment.linkedin_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          fontSize: 8, color: "#0A66C2", textDecoration: "none", fontWeight: 600,
-                        }}
-                      >
-                        LinkedIn ↗
-                      </a>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 7, color: P.textDim, marginTop: 6 }}>
-                    Angereichert: {new Date(enrichment.enriched_at).toLocaleDateString('de-DE')}
-                  </div>
-                </div>
+                        <div style={{ fontSize: 9, color: P.purple, fontWeight: 700, letterSpacing: "0.5px", marginBottom: 8 }}>
+                          KI-VORSCHLAG — BEARBEITEN
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>BESCHREIBUNG</div>
+                          <textarea
+                            value={pendingEnrichment.description || ''}
+                            onChange={e => update('description', e.target.value)}
+                            rows={2}
+                            style={{ ...inputStyle, resize: "vertical", minHeight: 36 }}
+                          />
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>BRANCHE</div>
+                          <input value={pendingEnrichment.industry || ''} onChange={e => update('industry', e.target.value)} style={inputStyle} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6, ...fieldStyle }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={labelStyle}>MITARBEITER</div>
+                            <input type="number" value={pendingEnrichment.estimated_size || ''} onChange={e => update('estimated_size', e.target.value)} min="1" style={inputStyle} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={labelStyle}>GEGRÜNDET</div>
+                            <input type="number" value={pendingEnrichment.founded_year || ''} onChange={e => update('founded_year', e.target.value)} min="1800" max="2030" style={inputStyle} />
+                          </div>
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>FIRMENTYP</div>
+                          <input value={pendingEnrichment.company_type || ''} onChange={e => update('company_type', e.target.value)} style={inputStyle} />
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>HAUPTSITZ</div>
+                          <input value={pendingEnrichment.headquarters || ''} onChange={e => update('headquarters', e.target.value)} style={inputStyle} />
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>WEBSITE</div>
+                          <input value={pendingEnrichment.website || ''} onChange={e => update('website', e.target.value)} style={inputStyle} />
+                        </div>
+                        <div style={fieldStyle}>
+                          <div style={labelStyle}>LINKEDIN URL</div>
+                          <input value={pendingEnrichment.linkedin_url || ''} onChange={e => update('linkedin_url', e.target.value)} style={inputStyle} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                          <button
+                            onClick={async () => {
+                              const saved = await saveCompanyEnrichment(selectedCompany.name, pendingEnrichment);
+                              setEnrichment(saved);
+                              const aiSize = pendingEnrichment.estimated_size ? Number(pendingEnrichment.estimated_size) : null;
+                              if (aiSize) {
+                                await renameCompany(selectedCompany.name, selectedCompany.name, aiSize);
+                                setSelectedCompany(prev => prev ? { ...prev, estimatedSize: aiSize } : null);
+                              }
+                              setPendingEnrichment(null);
+                            }}
+                            style={{
+                              flex: 1, padding: "5px 0",
+                              background: P.accent, border: "none", borderRadius: 4,
+                              color: "#000", fontSize: 9, fontWeight: 700,
+                              cursor: "pointer", fontFamily: "inherit",
+                            }}
+                          >
+                            ÜBERNEHMEN
+                          </button>
+                          <button
+                            onClick={() => setPendingEnrichment(null)}
+                            style={{
+                              flex: 1, padding: "5px 0",
+                              background: "transparent", border: `1px solid ${P.border}`,
+                              borderRadius: 4, color: P.textDim, fontSize: 9,
+                              cursor: "pointer", fontFamily: "inherit",
+                            }}
+                          >
+                            IGNORIEREN
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {!isUserCompany && selectedCompany.name !== "Unbekannt" && (
+                    <button
+                      onClick={() => {
+                        const count = selectedCompany.memberCount || 0;
+                        if (confirm(`"${selectedCompany.name}" und alle ${count} Kontakte wirklich löschen?`)) {
+                          deleteCompanyContacts(selectedCompany.name);
+                          setSelectedCompany(null);
+                          setIsEditing(false);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        marginTop: 14,
+                        padding: "8px 0",
+                        background: P.red + "12",
+                        border: `1px solid ${P.red}30`,
+                        borderRadius: 6,
+                        color: P.red,
+                        fontSize: 9,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      FIRMA LÖSCHEN ({selectedCompany.memberCount} Kontakte)
+                    </button>
+                  )}
+                </>
               )}
 
-              {/* Enrich button */}
-              <button
-                onClick={handleEnrich}
-                disabled={isEnriching}
-                style={{
-                  width: "100%", marginTop: 10, padding: "7px 0",
-                  background: isEnriching ? P.border : (enrichment?.enriched_at ? P.bg : P.purple + "15"),
-                  border: `1px solid ${enrichment?.enriched_at ? P.border : P.purple + "40"}`,
-                  borderRadius: 6,
-                  color: isEnriching ? P.textDim : (enrichment?.enriched_at ? P.textMuted : P.purple),
-                  fontSize: 9, fontWeight: 600,
-                  cursor: isEnriching ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  letterSpacing: "0.5px",
-                  transition: "all 0.15s",
-                }}
-              >
-                {isEnriching ? "WIRD ANGEREICHERT..." : (enrichment?.enriched_at ? "ERNEUT ANREICHERN" : "MIT KI ANREICHERN")}
-              </button>
-              {enrichError && (
-                <div style={{ fontSize: 8, color: P.red, marginTop: 4 }}>
-                  {enrichError}
-                </div>
-              )}
-
-              {/* Pending enrichment — editable preview */}
-              {pendingEnrichment && (() => {
-                const inputStyle = {
-                  width: "100%", padding: "5px 8px", background: P.bg,
-                  border: `1px solid ${P.border}`, borderRadius: 4,
-                  color: P.text, fontSize: 10, fontFamily: "inherit",
-                  outline: "none", boxSizing: "border-box",
-                };
-                const labelStyle = { fontSize: 8, color: P.textDim, marginBottom: 2, letterSpacing: "0.3px" };
-                const fieldStyle = { marginBottom: 6 };
-                const update = (key, val) => setPendingEnrichment(prev => ({ ...prev, [key]: val }));
-                return (
+              {/* === Links Tab === */}
+              {!isUnknownCompany && companyTab === "links" && (
+                <>
                   <div style={{
-                    marginTop: 8, padding: 10, background: P.purple + "08",
-                    borderRadius: 6, border: `1px solid ${P.purple}30`,
+                    padding: 10, background: P.bg,
+                    borderRadius: 7, border: `1px solid ${P.border}`,
                   }}>
-                    <div style={{ fontSize: 9, color: P.purple, fontWeight: 700, letterSpacing: "0.5px", marginBottom: 8 }}>
-                      KI-VORSCHLAG — BEARBEITEN
+                    <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1px", marginBottom: 8 }}>
+                      BEZIEHUNG ERSTELLEN
                     </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>BESCHREIBUNG</div>
-                      <textarea
-                        value={pendingEnrichment.description || ''}
-                        onChange={e => update('description', e.target.value)}
-                        rows={2}
-                        style={{ ...inputStyle, resize: "vertical", minHeight: 36 }}
-                      />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {Object.entries(RELATIONSHIP_TYPES).map(([type, info]) => (
+                        <button
+                          key={type}
+                          onClick={() => onStartLinking(selectedCompany.id, type)}
+                          style={{
+                            background: info.color + "15",
+                            border: `1px solid ${info.color}40`,
+                            borderRadius: 4,
+                            padding: "4px 8px",
+                            fontSize: 9,
+                            color: info.color,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          <span>{info.icon}</span>
+                          <span>{info.label}</span>
+                        </button>
+                      ))}
                     </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>BRANCHE</div>
-                      <input value={pendingEnrichment.industry || ''} onChange={e => update('industry', e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={{ display: "flex", gap: 6, ...fieldStyle }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={labelStyle}>MITARBEITER</div>
-                        <input type="number" value={pendingEnrichment.estimated_size || ''} onChange={e => update('estimated_size', e.target.value)} min="1" style={inputStyle} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={labelStyle}>GEGRÜNDET</div>
-                        <input type="number" value={pendingEnrichment.founded_year || ''} onChange={e => update('founded_year', e.target.value)} min="1800" max="2030" style={inputStyle} />
-                      </div>
-                    </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>FIRMENTYP</div>
-                      <input value={pendingEnrichment.company_type || ''} onChange={e => update('company_type', e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>HAUPTSITZ</div>
-                      <input value={pendingEnrichment.headquarters || ''} onChange={e => update('headquarters', e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>WEBSITE</div>
-                      <input value={pendingEnrichment.website || ''} onChange={e => update('website', e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={fieldStyle}>
-                      <div style={labelStyle}>LINKEDIN URL</div>
-                      <input value={pendingEnrichment.linkedin_url || ''} onChange={e => update('linkedin_url', e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                      <button
-                        onClick={async () => {
-                          const saved = await saveCompanyEnrichment(selectedCompany.name, pendingEnrichment);
-                          setEnrichment(saved);
-                          const aiSize = pendingEnrichment.estimated_size ? Number(pendingEnrichment.estimated_size) : null;
-                          if (aiSize) {
-                            await renameCompany(selectedCompany.name, selectedCompany.name, aiSize);
-                            setSelectedCompany(prev => prev ? { ...prev, estimatedSize: aiSize } : null);
-                          }
-                          setPendingEnrichment(null);
-                        }}
-                        style={{
-                          flex: 1, padding: "5px 0",
-                          background: P.accent, border: "none", borderRadius: 4,
-                          color: "#000", fontSize: 9, fontWeight: 700,
-                          cursor: "pointer", fontFamily: "inherit",
-                        }}
-                      >
-                        ÜBERNEHMEN
-                      </button>
-                      <button
-                        onClick={() => setPendingEnrichment(null)}
-                        style={{
-                          flex: 1, padding: "5px 0",
-                          background: "transparent", border: `1px solid ${P.border}`,
-                          borderRadius: 4, color: P.textDim, fontSize: 9,
-                          cursor: "pointer", fontFamily: "inherit",
-                        }}
-                      >
-                        IGNORIEREN
-                      </button>
+                    <div style={{ fontSize: 8, color: P.textDim, marginTop: 6 }}>
+                      Klicke auf Button, dann auf Ziel-Firma
                     </div>
                   </div>
+
+                  {companyRelationships.filter(r => {
+                    if (r.source !== selectedCompany.id && r.target !== selectedCompany.id) return false;
+                    const otherId = r.source === selectedCompany.id ? r.target : r.source;
+                    return companyNodes.some(c => c.id === otherId);
+                  }).length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      {[...companyRelationships].sort((a, b) => {
+                        const order = Object.keys(RELATIONSHIP_TYPES);
+                        return (order.indexOf(a.type) === -1 ? 999 : order.indexOf(a.type))
+                             - (order.indexOf(b.type) === -1 ? 999 : order.indexOf(b.type));
+                      }).map((rel, idx) => {
+                        if (rel.source !== selectedCompany.id && rel.target !== selectedCompany.id) return null;
+                        const otherId = rel.source === selectedCompany.id ? rel.target : rel.source;
+                        const otherCompany = companyNodes.find(c => c.id === otherId);
+                        if (!otherCompany) return null;
+                        const info = RELATIONSHIP_TYPES[rel.type] || { label: rel.type, color: P.textMuted, icon: "?" };
+                        const isSource = rel.source === selectedCompany.id;
+                        return (
+                          <div key={idx} style={{
+                            padding: "6px 8px",
+                            background: info.color + "10",
+                            border: `1px solid ${info.color}30`,
+                            borderRadius: 5,
+                            marginBottom: 4,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            fontSize: 9,
+                          }}>
+                            <div
+                              onClick={() => { setSelectedCompany(otherCompany); onFocusNode(otherId); }}
+                              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", flex: 1 }}
+                            >
+                              <span style={{ color: info.color }}>{info.icon}</span>
+                              <span style={{ color: P.text }}>{isSource ? (info.label + " von") : ((info.reverseLabel || info.label) + " für")}</span>
+                              <span style={{ color: info.color, fontWeight: 600 }}>{otherCompany?.name || "Unbekannt"}</span>
+                            </div>
+                            <button
+                              onClick={() => onDeleteRelationship(rel.id)}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: P.textDim,
+                                cursor: "pointer",
+                                fontSize: 10,
+                                padding: "2px 4px",
+                              }}
+                            >×</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* === Kontakte Tab === */}
+              {(isUnknownCompany || companyTab === "kontakte") && (() => {
+                const members = (selectedCompany.members || []).map(m => ({
+                  ...m,
+                  _seniority: m.seniority || calculateSeniority(m.position),
+                })).sort((a, b) => b._seniority - a._seniority);
+                const keyPlayers = members.filter(m => m._seniority >= 4);
+                const others = members.filter(m => m._seniority < 4);
+                const companyColor = companyColors[selectedCompany.id] || P.accent;
+
+                const renderMember = (m, i, isKey) => (
+                  <div key={m.id || i}
+                    onClick={() => { setSelectedContact(m); onFocusNode?.(m.id); }}
+                    style={{
+                    padding: "10px 11px",
+                    background: isKey ? companyColor + "08" : P.bg,
+                    borderRadius: 7,
+                    marginBottom: 5,
+                    border: `1px solid ${isKey ? companyColor + "25" : P.border}`,
+                    cursor: "pointer",
+                    transition: "transform 0.12s",
+                  }}
+                    onMouseOver={e => e.currentTarget.style.transform = "translateX(3px)"}
+                    onMouseOut={e => e.currentTarget.style.transform = "none"}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+                        {isKey && (
+                          <div style={{
+                            width: 6, height: 6, borderRadius: "50%",
+                            background: companyColor,
+                            flexShrink: 0,
+                            boxShadow: `0 0 4px ${companyColor}60`,
+                          }} />
+                        )}
+                        <div style={{ fontSize: 11, fontWeight: 600, color: P.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                        {m._seniority >= 8 && (
+                          <div style={{
+                            fontSize: 7, color: P.gold, background: P.goldDim,
+                            padding: "2px 6px", borderRadius: 10, fontWeight: 700,
+                          }}>C-LEVEL</div>
+                        )}
+                        {m._seniority >= 5 && m._seniority < 8 && (
+                          <div style={{
+                            fontSize: 7, color: companyColor, background: companyColor + "15",
+                            padding: "2px 6px", borderRadius: 10, fontWeight: 700,
+                          }}>SENIOR</div>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onEditContact(m); }}
+                          title="Bearbeiten"
+                          style={{
+                            background: P.blue + "20", border: `1px solid ${P.blue}40`,
+                            borderRadius: 3, padding: "2px 5px", fontSize: 8,
+                            color: P.blue, cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >✎</button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`"${m.name}" wirklich löschen?`)) {
+                              onDeleteContact(m.id);
+                            }
+                          }}
+                          title="Löschen"
+                          style={{
+                            background: P.red + "20", border: `1px solid ${P.red}40`,
+                            borderRadius: 3, padding: "2px 5px", fontSize: 8,
+                            color: P.red, cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >×</button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 9, color: P.textMuted, marginTop: 3 }}>
+                      {m.position || 'Connection'}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+                      {m.connectedOn && (
+                        <span style={{ fontSize: 8, color: P.textDim }}>
+                          Verbunden: {m.connectedOn}
+                        </span>
+                      )}
+                      {m.linkedinUrl && (
+                        <a
+                          href={m.linkedinUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{
+                            fontSize: 8, color: "#0A66C2", textDecoration: "none", fontWeight: 600,
+                          }}
+                        >
+                          LinkedIn
+                        </a>
+                      )}
+                    </div>
+                    {isUnknownCompany && m.linkedinUrl && (
+                      <div style={{
+                        fontSize: 7, color: P.textDim, marginTop: 2,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {m.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//, '').replace(/\/$/, '')}
+                      </div>
+                    )}
+                  </div>
+                );
+
+                return (
+                  <>
+                    {keyPlayers.length > 0 && (
+                      <>
+                        <div style={{
+                          fontSize: 9, color: companyColor, letterSpacing: "1px", marginBottom: 6,
+                          display: "flex", alignItems: "center", gap: 6,
+                        }}>
+                          <div style={{ width: 8, height: 2, background: companyColor, borderRadius: 1 }} />
+                          KEY PLAYER ({keyPlayers.length})
+                        </div>
+                        {keyPlayers.map((m, i) => renderMember(m, i, true))}
+                      </>
+                    )}
+                    {others.length > 0 && (
+                      <>
+                        <div style={{
+                          fontSize: 9, color: P.textDim, letterSpacing: "1px",
+                          marginBottom: 6, marginTop: keyPlayers.length > 0 ? 10 : 0,
+                        }}>
+                          WEITERE KONTAKTE ({others.length})
+                        </div>
+                        {others.map((m, i) => renderMember(m, i, false))}
+                      </>
+                    )}
+                  </>
                 );
               })()}
             </>
-          )}
-
-          {/* Relationship linking buttons */}
-          <div style={{
-            marginTop: 14, padding: 10, background: P.bg,
-            borderRadius: 7, border: `1px solid ${P.border}`,
-          }}>
-            <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1px", marginBottom: 8 }}>
-              BEZIEHUNG ERSTELLEN
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {Object.entries(RELATIONSHIP_TYPES).map(([type, info]) => (
-                <button
-                  key={type}
-                  onClick={() => onStartLinking(selectedCompany.id, type)}
-                  style={{
-                    background: info.color + "15",
-                    border: `1px solid ${info.color}40`,
-                    borderRadius: 4,
-                    padding: "4px 8px",
-                    fontSize: 9,
-                    color: info.color,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  <span>{info.icon}</span>
-                  <span>{info.label}</span>
-                </button>
-              ))}
-            </div>
-            <div style={{ fontSize: 8, color: P.textDim, marginTop: 6 }}>
-              Klicke auf Button, dann auf Ziel-Firma
-            </div>
-          </div>
-
-          {/* Existing relationships */}
-          {companyRelationships.filter(r => {
-            if (r.source !== selectedCompany.id && r.target !== selectedCompany.id) return false;
-            const otherId = r.source === selectedCompany.id ? r.target : r.source;
-            return companyNodes.some(c => c.id === otherId);
-          }).length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1px", marginBottom: 6 }}>
-                BEZIEHUNGEN
-              </div>
-              {companyRelationships.map((rel, idx) => {
-                if (rel.source !== selectedCompany.id && rel.target !== selectedCompany.id) return null;
-                const otherId = rel.source === selectedCompany.id ? rel.target : rel.source;
-                const otherCompany = companyNodes.find(c => c.id === otherId);
-                if (!otherCompany) return null;
-                const info = RELATIONSHIP_TYPES[rel.type] || { label: rel.type, color: P.textMuted, icon: "?" };
-                const isSource = rel.source === selectedCompany.id;
-                return (
-                  <div key={idx} style={{
-                    padding: "6px 8px",
-                    background: info.color + "10",
-                    border: `1px solid ${info.color}30`,
-                    borderRadius: 5,
-                    marginBottom: 4,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    fontSize: 9,
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ color: info.color }}>{info.icon}</span>
-                      <span style={{ color: P.text }}>{isSource ? (info.label + " von") : ((info.reverseLabel || info.label) + " für")}</span>
-                      <span style={{ color: info.color, fontWeight: 600 }}>{otherCompany?.name || "Unknown"}</span>
-                    </div>
-                    <button
-                      onClick={() => onDeleteRelationship(rel.id)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: P.textDim,
-                        cursor: "pointer",
-                        fontSize: 10,
-                        padding: "2px 4px",
-                      }}
-                    >×</button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Company members */}
-          {(() => {
-            const members = (selectedCompany.members || []).map(m => ({
-              ...m,
-              _seniority: m.seniority || calculateSeniority(m.position),
-            })).sort((a, b) => b._seniority - a._seniority);
-            const keyPlayers = members.filter(m => m._seniority >= 4);
-            const others = members.filter(m => m._seniority < 4);
-            const companyColor = companyColors[selectedCompany.id] || P.accent;
-
-            const renderMember = (m, i, isKey) => (
-              <div key={m.id || i}
-                onClick={() => { setSelectedContact(m); onFocusNode?.(m.id); }}
-                style={{
-                padding: "10px 11px",
-                background: isKey ? companyColor + "08" : P.bg,
-                borderRadius: 7,
-                marginBottom: 5,
-                border: `1px solid ${isKey ? companyColor + "25" : P.border}`,
-                cursor: "pointer",
-                transition: "transform 0.12s",
-              }}
-                onMouseOver={e => e.currentTarget.style.transform = "translateX(3px)"}
-                onMouseOut={e => e.currentTarget.style.transform = "none"}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-                    {isKey && (
-                      <div style={{
-                        width: 6, height: 6, borderRadius: "50%",
-                        background: companyColor,
-                        flexShrink: 0,
-                        boxShadow: `0 0 4px ${companyColor}60`,
-                      }} />
-                    )}
-                    <div style={{ fontSize: 11, fontWeight: 600, color: P.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
-                    {m._seniority >= 8 && (
-                      <div style={{
-                        fontSize: 7, color: P.gold, background: P.goldDim,
-                        padding: "2px 6px", borderRadius: 10, fontWeight: 700,
-                      }}>C-LEVEL</div>
-                    )}
-                    {m._seniority >= 5 && m._seniority < 8 && (
-                      <div style={{
-                        fontSize: 7, color: companyColor, background: companyColor + "15",
-                        padding: "2px 6px", borderRadius: 10, fontWeight: 700,
-                      }}>SENIOR</div>
-                    )}
-                    <button
-                      onClick={() => onEditContact(m)}
-                      title="Bearbeiten"
-                      style={{
-                        background: P.blue + "20", border: `1px solid ${P.blue}40`,
-                        borderRadius: 3, padding: "2px 5px", fontSize: 8,
-                        color: P.blue, cursor: "pointer", fontFamily: "inherit",
-                      }}
-                    >✎</button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`"${m.name}" wirklich löschen?`)) {
-                          onDeleteContact(m.id);
-                        }
-                      }}
-                      title="Löschen"
-                      style={{
-                        background: P.red + "20", border: `1px solid ${P.red}40`,
-                        borderRadius: 3, padding: "2px 5px", fontSize: 8,
-                        color: P.red, cursor: "pointer", fontFamily: "inherit",
-                      }}
-                    >×</button>
-                  </div>
-                </div>
-                <div style={{ fontSize: 9, color: P.textMuted, marginTop: 3 }}>
-                  {m.position || 'Connection'}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                  {m.connectedOn && (
-                    <span style={{ fontSize: 8, color: P.textDim }}>
-                      Verbunden: {m.connectedOn}
-                    </span>
-                  )}
-                  {m.linkedinUrl && (
-                    <a
-                      href={m.linkedinUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={e => e.stopPropagation()}
-                      style={{
-                        fontSize: 8, color: "#0A66C2", textDecoration: "none", fontWeight: 600,
-                      }}
-                    >
-                      LinkedIn
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-
-            return (
-              <div style={{ marginTop: 14 }}>
-                {keyPlayers.length > 0 && (
-                  <>
-                    <div style={{
-                      fontSize: 9, color: companyColor, letterSpacing: "1px", marginBottom: 6,
-                      display: "flex", alignItems: "center", gap: 6,
-                    }}>
-                      <div style={{ width: 8, height: 2, background: companyColor, borderRadius: 1 }} />
-                      KEY PLAYER ({keyPlayers.length})
-                    </div>
-                    {keyPlayers.map((m, i) => renderMember(m, i, true))}
-                  </>
-                )}
-                {others.length > 0 && (
-                  <>
-                    <div style={{
-                      fontSize: 9, color: P.textDim, letterSpacing: "1px",
-                      marginBottom: 6, marginTop: keyPlayers.length > 0 ? 10 : 0,
-                    }}>
-                      WEITERE KONTAKTE ({others.length})
-                    </div>
-                    {others.map((m, i) => renderMember(m, i, false))}
-                  </>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Delete company button (not for user's own company) */}
-          {!isUserCompany && (
-            <button
-              onClick={() => {
-                const count = selectedCompany.memberCount || 0;
-                if (confirm(`"${selectedCompany.name}" und alle ${count} Kontakte wirklich löschen?`)) {
-                  deleteCompanyContacts(selectedCompany.name);
-                  setSelectedCompany(null);
-                  setIsEditing(false);
-                }
-              }}
-              style={{
-                width: "100%",
-                marginTop: 14,
-                padding: "8px 0",
-                background: P.red + "12",
-                border: `1px solid ${P.red}30`,
-                borderRadius: 6,
-                color: P.red,
-                fontSize: 9,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                letterSpacing: "0.5px",
-              }}
-            >
-              FIRMA LÖSCHEN ({selectedCompany.memberCount} Kontakte)
-            </button>
           )}
         </div>
       </div>
     );
   }
 
-  // Default view: Influencers and Companies
+  // Default view: Influencers and Companies with tabs
   return (
     <div style={{ width: 280, height: "100%", borderLeft: `1px solid ${P.border}`, background: P.surface, overflowY: "auto", flexShrink: 0 }}>
       <div style={{ padding: 16 }}>
-        {/* Top Influencers */}
-        <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1.5px", marginBottom: 12 }}>
-          TOP INFLUENCER
+        {/* Tab bar */}
+        <div style={{
+          display: "flex", gap: 0, marginBottom: 14,
+          borderBottom: `1px solid ${P.border}`,
+        }}>
+          {[
+            { key: "influencer", label: "Influencer" },
+            { key: "firmen", label: "Firmen" },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => { setSidebarTab(tab.key); setSidebarExpanded(false); }}
+              style={{
+                flex: 1,
+                padding: "7px 0",
+                background: "transparent",
+                border: "none",
+                borderBottom: sidebarTab === tab.key ? `2px solid ${P.accent}` : "2px solid transparent",
+                color: sidebarTab === tab.key ? P.accent : P.textDim,
+                fontSize: 9,
+                fontWeight: sidebarTab === tab.key ? 700 : 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: "0.5px",
+                transition: "all 0.15s",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-        {topInfluencers.slice(0, 12).map((c, i) => (
-          <div
-            key={c.id}
-            onClick={() => {
-              setSelectedContact(c);
-              const co = companyNodes.find(n => n.name === c.company);
-              setSelectedCompany(co || null);
-              onFocusNode?.(c.id);
-            }}
-            style={{
-              padding: "8px 10px",
-              background: i < 3 ? P.goldDim : P.bg,
-              borderRadius: 7,
-              marginBottom: 5,
-              border: `1px solid ${i < 3 ? P.gold + "25" : P.border}`,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              transition: "transform 0.12s",
-            }}
-            onMouseOver={e => e.currentTarget.style.transform = "translateX(3px)"}
-            onMouseOut={e => e.currentTarget.style.transform = "none"}
-          >
-            <div style={{
-              width: 22, height: 22, borderRadius: 5,
-              background: i < 3 ? P.gold + "20" : P.border,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 9, fontWeight: 700,
-              color: i < 3 ? P.gold : P.textMuted,
-              flexShrink: 0,
-            }}>
-              {i + 1}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 10, fontWeight: 600, color: P.text,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {c.name}
-              </div>
-              <div style={{
-                fontSize: 8, color: P.textDim, marginTop: 1,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {c.position || 'Connection'} · {c.company}
-              </div>
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: i < 3 ? P.gold : P.textMuted }}>
-              {(c.normalizedInfluence * 100).toFixed(0)}
-            </div>
-          </div>
-        ))}
 
-        {/* Largest Companies */}
-        <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1.5px", marginTop: 22, marginBottom: 12 }}>
-          GRÖßTE FIRMEN
-        </div>
-        {companyNodes.slice(0, 12).map(c => (
-          <div
-            key={c.id}
-            onClick={() => { setSelectedCompany(c); setSelectedContact(null); onFocusNode?.(c.id); }}
-            style={{
-              padding: "8px 10px",
-              background: P.bg,
-              borderRadius: 7,
-              marginBottom: 4,
-              border: `1px solid ${P.border}`,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              transition: "border-color 0.12s",
-            }}
-            onMouseOver={e => e.currentTarget.style.borderColor = companyColors[c.id]}
-            onMouseOut={e => e.currentTarget.style.borderColor = P.border}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0 }}>
+        {/* === Influencer Tab === */}
+        {sidebarTab === "influencer" && (() => {
+          const filtered = topInfluencers.filter(c => {
+            const score = Math.round(c.normalizedInfluence * 100);
+            return score >= minInfluenceScore && score <= maxInfluenceScore;
+          });
+          const pctMin = minInfluenceScore;
+          const pctMax = maxInfluenceScore;
+          return (
+          <>
+            <div style={{ marginBottom: 10 }}>
               <div style={{
-                width: 7, height: 7, borderRadius: "50%",
-                background: companyColors[c.id] || P.accent,
-                flexShrink: 0,
-              }} />
-              <span style={{
-                fontSize: 10, color: P.text,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                fontSize: 9, color: P.textDim, marginBottom: 6,
               }}>
-                {c.name}
-              </span>
+                <span>Score</span>
+                <span style={{ color: P.text, fontWeight: 600 }}>{minInfluenceScore} – {maxInfluenceScore}</span>
+              </div>
+              <div style={{ position: "relative", height: 20 }}>
+                <div style={{
+                  position: "absolute", top: 8, left: 0, right: 0, height: 4,
+                  background: P.border, borderRadius: 2,
+                }} />
+                <div style={{
+                  position: "absolute", top: 8, height: 4,
+                  left: `${pctMin}%`, right: `${100 - pctMax}%`,
+                  background: P.accent, borderRadius: 2,
+                }} />
+                <input
+                  type="range"
+                  min={0} max={100} step={5}
+                  value={minInfluenceScore}
+                  onChange={e => { const v = Number(e.target.value); setMinInfluenceScore(Math.min(v, maxInfluenceScore)); setSidebarExpanded(false); }}
+                  style={{
+                    position: "absolute", top: 0, left: 0, width: "100%", height: 20,
+                    WebkitAppearance: "none", appearance: "none", background: "transparent",
+                    pointerEvents: "none", margin: 0, zIndex: 2,
+                  }}
+                  className="range-thumb"
+                />
+                <input
+                  type="range"
+                  min={0} max={100} step={5}
+                  value={maxInfluenceScore}
+                  onChange={e => { const v = Number(e.target.value); setMaxInfluenceScore(Math.max(v, minInfluenceScore)); setSidebarExpanded(false); }}
+                  style={{
+                    position: "absolute", top: 0, left: 0, width: "100%", height: 20,
+                    WebkitAppearance: "none", appearance: "none", background: "transparent",
+                    pointerEvents: "none", margin: 0, zIndex: 3,
+                  }}
+                  className="range-thumb"
+                />
+                <style>{`
+                  .range-thumb::-webkit-slider-thumb {
+                    -webkit-appearance: none; appearance: none;
+                    width: 14px; height: 14px; border-radius: 50%;
+                    background: ${P.accent}; border: 2px solid ${P.bg};
+                    cursor: pointer; pointer-events: auto;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                  }
+                  .range-thumb::-moz-range-thumb {
+                    width: 14px; height: 14px; border-radius: 50%;
+                    background: ${P.accent}; border: 2px solid ${P.bg};
+                    cursor: pointer; pointer-events: auto;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                  }
+                `}</style>
+              </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <span style={{ fontSize: 9, color: P.textDim }}>{c.memberCount}×</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: P.textMuted, minWidth: 32, textAlign: "right" }}>
-                {formatSize(c.estimatedSize)}
-              </span>
+            <div style={{ fontSize: 8, color: P.textDim, marginBottom: 8 }}>
+              {filtered.length} Kontakte
             </div>
-          </div>
-        ))}
+            {filtered.slice(0, sidebarExpanded ? filtered.length : 12).map((c, i) => (
+              <div
+                key={c.id}
+                onClick={() => {
+                  setSelectedContact(c);
+                  const co = companyNodes.find(n => n.name === c.company);
+                  setSelectedCompany(co || null);
+                  onFocusNode?.(c.id);
+                }}
+                style={{
+                  padding: "8px 10px",
+                  background: i < 3 ? P.goldDim : P.bg,
+                  borderRadius: 7,
+                  marginBottom: 5,
+                  border: `1px solid ${i < 3 ? P.gold + "25" : P.border}`,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  transition: "transform 0.12s",
+                }}
+                onMouseOver={e => e.currentTarget.style.transform = "translateX(3px)"}
+                onMouseOut={e => e.currentTarget.style.transform = "none"}
+              >
+                <div style={{
+                  width: 22, height: 22, borderRadius: 5,
+                  background: i < 3 ? P.gold + "20" : P.border,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 9, fontWeight: 700,
+                  color: i < 3 ? P.gold : P.textMuted,
+                  flexShrink: 0,
+                }}>
+                  {i + 1}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 600, color: P.text,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {c.name}
+                  </div>
+                  <div style={{
+                    fontSize: 8, color: P.textDim, marginTop: 1,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {c.position || 'Connection'} · {c.company}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: i < 3 ? P.gold : P.textMuted }}>
+                  {(c.normalizedInfluence * 100).toFixed(0)}
+                </div>
+              </div>
+            ))}
+            {filtered.length > 12 && (
+              <button
+                onClick={() => setSidebarExpanded(!sidebarExpanded)}
+                style={{
+                  width: "100%", marginTop: 6, padding: "6px 0",
+                  background: "transparent",
+                  border: `1px solid ${P.border}`,
+                  borderRadius: 5,
+                  color: P.textDim,
+                  fontSize: 9,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "color 0.15s",
+                }}
+                onMouseOver={e => e.currentTarget.style.color = P.accent}
+                onMouseOut={e => e.currentTarget.style.color = P.textDim}
+              >
+                {sidebarExpanded ? "Weniger anzeigen" : `Alle anzeigen (${filtered.length})`}
+              </button>
+            )}
+          </>
+          );
+        })()}
+
+        {/* === Firmen Tab === */}
+        {sidebarTab === "firmen" && (() => {
+          const sizes = companyNodes.map(c => c.estimatedSize || 1);
+          const sliderMax = sizes.length > 0 ? Math.max(...sizes) : 1;
+          const effectiveMax = firmenMaxContacts === Infinity ? sliderMax : Math.min(firmenMaxContacts, sliderMax);
+          const effectiveMin = Math.min(firmenMinContacts, effectiveMax);
+          const pctMin = ((effectiveMin - 1) / Math.max(sliderMax - 1, 1)) * 100;
+          const pctMax = ((effectiveMax - 1) / Math.max(sliderMax - 1, 1)) * 100;
+          const filtered = companyNodes.filter(c => (c.estimatedSize || 1) >= effectiveMin && (c.estimatedSize || 1) <= effectiveMax);
+          return (
+          <>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                fontSize: 9, color: P.textDim, marginBottom: 6,
+              }}>
+                <span>Mitarbeiter</span>
+                <span style={{ color: P.text, fontWeight: 600 }}>{formatSize(effectiveMin)} – {formatSize(effectiveMax)}</span>
+              </div>
+              <div style={{ position: "relative", height: 20 }}>
+                <div style={{
+                  position: "absolute", top: 8, left: 0, right: 0, height: 4,
+                  background: P.border, borderRadius: 2,
+                }} />
+                <div style={{
+                  position: "absolute", top: 8, height: 4,
+                  left: `${pctMin}%`, right: `${100 - pctMax}%`,
+                  background: P.accent, borderRadius: 2,
+                }} />
+                <input
+                  type="range"
+                  min={1} max={sliderMax} step={1}
+                  value={effectiveMin}
+                  onChange={e => { const v = Number(e.target.value); setFirmenMinContacts(Math.min(v, effectiveMax)); setSidebarExpanded(false); }}
+                  style={{
+                    position: "absolute", top: 0, left: 0, width: "100%", height: 20,
+                    WebkitAppearance: "none", appearance: "none", background: "transparent",
+                    pointerEvents: "none", margin: 0, zIndex: 2,
+                  }}
+                  className="range-thumb"
+                />
+                <input
+                  type="range"
+                  min={1} max={sliderMax} step={1}
+                  value={effectiveMax}
+                  onChange={e => { const v = Number(e.target.value); setFirmenMaxContacts(Math.max(v, effectiveMin)); setSidebarExpanded(false); }}
+                  style={{
+                    position: "absolute", top: 0, left: 0, width: "100%", height: 20,
+                    WebkitAppearance: "none", appearance: "none", background: "transparent",
+                    pointerEvents: "none", margin: 0, zIndex: 3,
+                  }}
+                  className="range-thumb"
+                />
+                <style>{`
+                  .range-thumb::-webkit-slider-thumb {
+                    -webkit-appearance: none; appearance: none;
+                    width: 14px; height: 14px; border-radius: 50%;
+                    background: ${P.accent}; border: 2px solid ${P.bg};
+                    cursor: pointer; pointer-events: auto;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                  }
+                  .range-thumb::-moz-range-thumb {
+                    width: 14px; height: 14px; border-radius: 50%;
+                    background: ${P.accent}; border: 2px solid ${P.bg};
+                    cursor: pointer; pointer-events: auto;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                  }
+                `}</style>
+              </div>
+            </div>
+            <div style={{ fontSize: 8, color: P.textDim, marginBottom: 8 }}>
+              {filtered.length} Firmen
+            </div>
+            {filtered.slice(0, sidebarExpanded ? filtered.length : 12).map(c => (
+              <div
+                key={c.id}
+                onClick={() => { setSelectedCompany(c); setSelectedContact(null); onFocusNode?.(c.id); }}
+                style={{
+                  padding: "8px 10px",
+                  background: P.bg,
+                  borderRadius: 7,
+                  marginBottom: 4,
+                  border: `1px solid ${P.border}`,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  transition: "border-color 0.12s",
+                }}
+                onMouseOver={e => e.currentTarget.style.borderColor = companyColors[c.id]}
+                onMouseOut={e => e.currentTarget.style.borderColor = P.border}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: "50%",
+                    background: companyColors[c.id] || P.accent,
+                    flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: 10, color: P.text,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {c.name}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <span style={{ fontSize: 9, color: P.textDim }}>{c.memberCount}×</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: P.textMuted, minWidth: 32, textAlign: "right" }}>
+                    {formatSize(c.estimatedSize)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {filtered.length > 12 && (
+              <button
+                onClick={() => setSidebarExpanded(!sidebarExpanded)}
+                style={{
+                  width: "100%", marginTop: 6, padding: "6px 0",
+                  background: "transparent",
+                  border: `1px solid ${P.border}`,
+                  borderRadius: 5,
+                  color: P.textDim,
+                  fontSize: 9,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "color 0.15s",
+                }}
+                onMouseOver={e => e.currentTarget.style.color = P.accent}
+                onMouseOut={e => e.currentTarget.style.color = P.textDim}
+              >
+                {sidebarExpanded ? "Weniger anzeigen" : `Alle anzeigen (${filtered.length})`}
+              </button>
+            )}
+          </>
+          );
+        })()}
 
         {/* Help text */}
         <div style={{

@@ -171,7 +171,7 @@ export default function App() {
   const [focusNode, setFocusNode] = useState(null);
   const [industryFilter, setIndustryFilter] = useState("all");
   const [agarFullscreen, setAgarFullscreen] = useState(false);
-  const [focusConnections, setFocusConnections] = useState(true);
+  const [focusConnections, setFocusConnections] = useState(false);
 
   // Listen for agar fullscreen toggle events
   useEffect(() => {
@@ -180,15 +180,8 @@ export default function App() {
     return () => window.removeEventListener("agar-fullscreen", onAgarFullscreen);
   }, []);
 
-  // Auto-adjust filters for large networks
-  useEffect(() => {
-    if (contacts.length > 500) {
-      setMinCompanySize(2);
-    }
-    if (contacts.length > 1000) {
-      setMinCompanySize(3);
-    }
-  }, [contacts.length]);
+  // Fokus defaults to off so all companies show initially
+  // (Users can enable Fokus/Direkt manually when needed)
 
   // Filter contacts by seniority (always keep user's own contact + user's company contacts)
   const filteredContacts = useMemo(() => {
@@ -234,7 +227,7 @@ export default function App() {
 
   // Top influencers
   const topInfluencers = useMemo(() =>
-    [...network.contactNodes].sort((a, b) => b.influenceScore - a.influenceScore).slice(0, 15)
+    [...network.contactNodes].sort((a, b) => b.influenceScore - a.influenceScore)
   , [network]);
 
   // Inferred company connections
@@ -459,6 +452,7 @@ export default function App() {
               companyColors={companyColors}
               showCompanyLinks={showCompanyLinks}
               allCompanyLinks={filteredCompanyLinks}
+              dimRelationships={allCompanyLinks}
               linkingMode={linkingMode}
               onCompanyClick={handleCompanyClick}
               onContactClick={handleContactClick}
