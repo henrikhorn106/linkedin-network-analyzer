@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import * as d3 from 'd3';
 import { P } from '../styles/theme';
 import { RELATIONSHIP_TYPES } from '../data/constants';
 
-export function NetworkGraph({
+export const NetworkGraph = forwardRef(function NetworkGraph({
   network,
   companyColors,
   showCompanyLinks,
@@ -16,7 +16,11 @@ export function NetworkGraph({
   userCompanyColor,
   focusNode,
   selectedCompany,
-}) {
+  showRelationshipLabels,
+  showContactDots,
+  showContactLines,
+  showCompanyText,
+}, ref) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
@@ -27,9 +31,61 @@ export function NetworkGraph({
   const companyGroupsRef = useRef(null);
   const contactLinksRef = useRef(null);
   const companyLinksRef = useRef(null);
+  const companyLinkLabelRef = useRef(null);
+  const companyLinkLabelBgRef = useRef(null);
   const userBubbleRef = useRef(null);
   const selectedCompanyRef = useRef(null);
   selectedCompanyRef.current = selectedCompany;
+  const showRelationshipLabelsRef = useRef(showRelationshipLabels);
+  showRelationshipLabelsRef.current = showRelationshipLabels;
+  const showContactDotsRef = useRef(showContactDots);
+  showContactDotsRef.current = showContactDots;
+  const showContactLinesRef = useRef(showContactLines);
+  showContactLinesRef.current = showContactLines;
+  const showCompanyTextRef = useRef(showCompanyText);
+  showCompanyTextRef.current = showCompanyText;
+  const contactGroupRef = useRef(null);
+  const contactLinkGroupRef = useRef(null);
+
+  useImperativeHandle(ref, () => ({
+    zoomToFit: () => {
+      const nodes = nodesRef.current;
+      const svg = svgRef.current;
+      const zoom = zoomRef.current;
+      if (!nodes || !svg || !zoom || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const w = rect.width, h = rect.height;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        if (n.x == null || n.y == null) return;
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x);
+        maxY = Math.max(maxY, n.y);
+      });
+      if (!isFinite(minX)) return;
+      const pad = 80;
+      const bw = (maxX - minX) + pad * 2;
+      const bh = (maxY - minY) + pad * 2;
+      const scale = Math.min(w / bw, h / bh, 2);
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const t = d3.zoomIdentity.translate(w / 2, h / 2).scale(scale).translate(-cx, -cy);
+      d3.select(svg).transition().duration(600).call(zoom.transform, t);
+    },
+    centerOnCompany: () => {
+      const nodes = nodesRef.current;
+      const svg = svgRef.current;
+      const zoom = zoomRef.current;
+      if (!nodes || !svg || !zoom || !containerRef.current) return;
+      const userNode = nodes.find(n => n.type === "company" && n.isUserCompany);
+      if (!userNode || userNode.x == null) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const t = d3.zoomIdentity.translate(rect.width / 2, rect.height / 2).scale(1).translate(-userNode.x, -userNode.y);
+      d3.select(svg).transition().duration(600).call(zoom.transform, t);
+    },
+    getSvgElement: () => svgRef.current,
+  }));
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
@@ -67,6 +123,14 @@ export function NetworkGraph({
     sfm.append("feMergeNode").attr("in", "b2");
     sfm.append("feMergeNode").attr("in", "SourceGraphic");
 
+    // Glow filter for hovered relationship lines
+    const linkGlow = defs.append("filter").attr("id", "link-glow")
+      .attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+    linkGlow.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "b");
+    const lgm = linkGlow.append("feMerge");
+    lgm.append("feMergeNode").attr("in", "b");
+    lgm.append("feMergeNode").attr("in", "SourceGraphic");
+
     // Radial gradient for sun core
     const sunGrad = defs.append("radialGradient").attr("id", "sun-gradient");
     sunGrad.append("stop").attr("offset", "0%").attr("stop-color", ucColor).attr("stop-opacity", 0.35);
@@ -75,8 +139,11 @@ export function NetworkGraph({
     sunGrad.append("stop").attr("offset", "100%").attr("stop-color", ucColor).attr("stop-opacity", 0);
 
     // Corona classes (used for zoom-based opacity control, no CSS animation)
+    // + animated dash offset for inferred connections
     svg.append("style").text(`
       .sun-corona, .sun-corona-outer { transition: opacity 0.3s ease; }
+      @keyframes dash-flow { to { stroke-dashoffset: -20; } }
+      .company-link-inferred { animation: dash-flow 1.2s linear infinite; }
     `);
 
     // Arrow markers for company-to-company links
@@ -88,64 +155,51 @@ export function NetworkGraph({
       competitor: { color: "#EF4444", bidir: true },
       inferred: { color: P.purple, bidir: false },
     };
+    const baseMarkerSize = 18;
     Object.entries(arrowTypes).forEach(([type, { color }]) => {
-      defs.append("marker")
+      const marker = defs.append("marker")
         .attr("id", `arrow-${type}`)
         .attr("viewBox", "0 -5 10 10")
-        .attr("refX", 10).attr("refY", 0)
-        .attr("markerWidth", 5).attr("markerHeight", 5)
-        .attr("orient", "auto")
-        .append("path")
-        .attr("d", "M0,-4L10,0L0,4")
+        .attr("refX", 8).attr("refY", 0)
+        .attr("markerWidth", baseMarkerSize).attr("markerHeight", baseMarkerSize)
+        .attr("markerUnits", "userSpaceOnUse")
+        .attr("orient", "auto");
+      marker.append("path")
+        .attr("d", "M0,-3 Q5,-3 10,0 Q5,3 0,3 Q1.5,0 0,-3 Z")
         .attr("fill", color);
       // Reverse arrow for bidirectional
-      defs.append("marker")
+      const markerRev = defs.append("marker")
         .attr("id", `arrow-${type}-rev`)
         .attr("viewBox", "-10 -5 10 10")
-        .attr("refX", -10).attr("refY", 0)
-        .attr("markerWidth", 5).attr("markerHeight", 5)
-        .attr("orient", "auto")
-        .append("path")
-        .attr("d", "M0,-4L-10,0L0,4")
+        .attr("refX", -8).attr("refY", 0)
+        .attr("markerWidth", baseMarkerSize).attr("markerHeight", baseMarkerSize)
+        .attr("markerUnits", "userSpaceOnUse")
+        .attr("orient", "auto");
+      markerRev.append("path")
+        .attr("d", "M0,-3 Q-5,-3 -10,0 Q-5,3 0,3 Q-1.5,0 0,-3 Z")
         .attr("fill", color);
     });
 
     const g = svg.append("g");
     gRef.current = g;
     let currentZoomScale = 1;
-    let _linkGroup = null, _link = null;
-    let _contactGroup = null, _cN = null;
-    let linkThreshold = 1.0;
-    let contactThreshold = 0.6;
     const zoom = d3.zoom().scaleExtent([0.1, 4]).on("zoom", e => {
       g.attr("transform", e.transform);
       const prevScale = currentZoomScale;
       currentZoomScale = e.transform.k;
-      // Only update effects when scale actually changes
       if (prevScale !== currentZoomScale) {
-        // Toggle contact dots based on zoom level
-        if (_contactGroup) {
-          if (currentZoomScale >= contactThreshold && prevScale < contactThreshold) {
-            // Sync positions before showing (they may have drifted while hidden)
-            _cN.attr("cx", d => d.x).attr("cy", d => d.y);
-            _contactGroup.attr("display", null);
-          } else if (currentZoomScale < contactThreshold && prevScale >= contactThreshold) {
-            _contactGroup.attr("display", "none");
-          }
-        }
-        // Toggle contact-to-company links based on zoom level
-        if (_linkGroup) {
-          if (currentZoomScale >= linkThreshold && prevScale < linkThreshold) {
-            _linkGroup.attr("display", null);
-            _link.attr("display", null);
-          } else if (currentZoomScale < linkThreshold && prevScale >= linkThreshold) {
-            _linkGroup.attr("display", "none");
-          }
-        }
         // Scale corona/glow intensity with zoom — bigger glow when zoomed out, subtle when zoomed in
         const glowOpacity = Math.max(0.1, Math.min(1, (1.8 - currentZoomScale) / 1.2));
         g.selectAll(".sun-corona, .sun-corona-outer").style("opacity", glowOpacity);
         g.selectAll(".sun-glow-bubble").attr("filter", currentZoomScale < 2.5 ? "url(#sun-glow)" : "none");
+        // Scale arrow markers + stroke widths inversely with zoom for consistent screen size
+        const scaleFactor = 1 / Math.sqrt(currentZoomScale);
+        const markerSize = baseMarkerSize * scaleFactor;
+        defs.selectAll("marker").attr("markerWidth", markerSize).attr("markerHeight", markerSize);
+        g.selectAll(".company-link-visible").each(function(d) {
+          const base = 2 + (d.strength || 0.5) * 2;
+          d3.select(this).attr("stroke-width", base * scaleFactor);
+        });
       }
     });
     svg.call(zoom);
@@ -175,8 +229,7 @@ export function NetworkGraph({
 
     // Performance: adjust for large networks
     const isLargeNetwork = nodes.length > 200;
-    linkThreshold = isLargeNetwork ? 1.2 : 0.6;
-    contactThreshold = isLargeNetwork ? 0.45 : 0.25;
+    // (thresholds removed — contact dots/lines now controlled by toolbar toggles)
 
     // Compute radius scaling from actual company data
     const companyDataNodes = nodes.filter(n => n.type === "company" && !n.isUserCompany);
@@ -286,16 +339,19 @@ export function NetworkGraph({
       });
     });
 
-    const companyLink = companyLinksRef.current = g.append("g").selectAll("path").data(companyLinkData).join("path")
+    const companyLinkGroup = g.append("g");
+    const companyLink = companyLinksRef.current = companyLinkGroup.selectAll("path.company-link-visible").data(companyLinkData).join("path")
+      .attr("class", d => `company-link-visible${d.type === "inferred" ? " company-link-inferred" : ""}`)
       .attr("stroke", d => {
         if (d.type && RELATIONSHIP_TYPES[d.type]) {
           return RELATIONSHIP_TYPES[d.type].color;
         }
         return P.purple;
       })
-      .attr("stroke-width", d => 1.5 + (d.strength || 0.5) * 2)
-      .attr("stroke-opacity", d => d.type === "inferred" ? 0.3 : 0.6)
-      .attr("stroke-dasharray", d => d.type === "inferred" ? "4,4" : "none")
+      .attr("stroke-width", d => 2 + (d.strength || 0.5) * 2)
+      .attr("opacity", d => d.type === "inferred" ? 0.3 : 0.65)
+      .attr("stroke-dasharray", d => d.type === "inferred" ? "5,5" : "none")
+      .attr("stroke-linecap", "round")
       .attr("fill", "none")
       .attr("marker-end", d => `url(#arrow-${getArrowType(d)})`)
       .attr("marker-start", d => {
@@ -303,25 +359,87 @@ export function NetworkGraph({
         return arrowTypes[type]?.bidir ? `url(#arrow-${type}-rev)` : null;
       });
 
-    // Contact-to-company links — hidden when zoomed out, visible when zoomed in
-    const linkGroup = g.append("g");
+    // Relationship label backgrounds + text at midpoint
+    const labelDisplay = showRelationshipLabelsRef.current ? null : "none";
+    const companyLinkLabelBg = companyLinkGroup.selectAll("rect.company-link-label-bg").data(companyLinkData).join("rect")
+      .attr("class", "company-link-label-bg")
+      .attr("fill", "#0D0D0D")
+      .attr("fill-opacity", 0.85)
+      .attr("rx", 3).attr("ry", 3)
+      .attr("pointer-events", "none")
+      .attr("display", labelDisplay);
+
+    const companyLinkLabel = companyLinkGroup.selectAll("text.company-link-label").data(companyLinkData).join("text")
+      .attr("class", "company-link-label")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("font-size", 7.5)
+      .attr("font-weight", 600)
+      .style("font-family", "'JetBrains Mono', monospace")
+      .attr("pointer-events", "none")
+      .attr("fill", d => {
+        if (d.type && RELATIONSHIP_TYPES[d.type]) return RELATIONSHIP_TYPES[d.type].color;
+        return P.purple;
+      })
+      .text(d => {
+        if (d.type && RELATIONSHIP_TYPES[d.type]) return RELATIONSHIP_TYPES[d.type].label;
+        return "Verknüpft";
+      })
+      .attr("display", labelDisplay);
+
+    // Invisible wider hit areas for hover
+    const companyLinkHit = companyLinkGroup.selectAll("path.company-link-hit").data(companyLinkData).join("path")
+      .attr("class", "company-link-hit")
+      .attr("stroke", "transparent")
+      .attr("stroke-width", 14)
+      .attr("fill", "none")
+      .attr("cursor", "pointer")
+      .on("mouseover", function(_, d) {
+        // Skip hover on dimmed paths when a company is selected
+        const sc = selectedCompanyRef.current;
+        if (sc) {
+          const sId = typeof d.source === "object" ? d.source.id : d.source;
+          const tId = typeof d.target === "object" ? d.target.id : d.target;
+          if (sId !== sc.id && tId !== sc.id) return;
+        }
+        const idx = companyLinkData.indexOf(d);
+        companyLink.filter((_, i) => i === idx)
+          .attr("opacity", 1)
+          .attr("filter", "url(#link-glow)");
+      })
+      .on("mouseout", function(_, d) {
+        const sc = selectedCompanyRef.current;
+        if (sc) {
+          const sId = typeof d.source === "object" ? d.source.id : d.source;
+          const tId = typeof d.target === "object" ? d.target.id : d.target;
+          if (sId !== sc.id && tId !== sc.id) return;
+        }
+        const idx = companyLinkData.indexOf(d);
+        const baseOpacity = d.type === "inferred" ? 0.3 : 0.65;
+        companyLink.filter((_, i) => i === idx)
+          .attr("opacity", baseOpacity)
+          .attr("filter", null);
+      });
+
+    companyLinkLabelRef.current = companyLinkLabel;
+    companyLinkLabelBgRef.current = companyLinkLabelBg;
+
+    // Contact-to-company links
+    const linkGroup = g.append("g")
+      .attr("display", showContactLinesRef.current ? null : "none");
     const link = contactLinksRef.current = linkGroup.selectAll("line").data(links).join("line")
       .attr("stroke", d => {
         const tid = typeof d.target === "object" ? d.target.id : d.target;
         return (companyColors[tid] || P.border) + "20";
       })
       .attr("stroke-width", isLargeNetwork ? 0.3 : 0.6);
-    linkGroup.attr("display", "none");
-    _linkGroup = linkGroup;
-    _link = link;
+    contactLinkGroupRef.current = linkGroup;
 
     // Company bubbles
-    const hoveredCompanyId = { current: null };
     const cG = companyGroupsRef.current = g.append("g").selectAll("g").data(nodes.filter(n => n.type === "company")).join("g")
       .attr("cursor", linkingMode ? "crosshair" : "pointer")
       .on("click", (_, d) => onCompanyClick(d))
       .on("mouseover", function(_, d) {
-        hoveredCompanyId.current = d.id;
         const group = d3.select(this);
         const color = companyColors[d.id] || P.accent;
         if (d.isUserCompany) {
@@ -338,7 +456,6 @@ export function NetworkGraph({
         }
       })
       .on("mouseout", function(_, d) {
-        hoveredCompanyId.current = null;
         const group = d3.select(this);
         const color = companyColors[d.id] || P.accent;
         if (d.isUserCompany) {
@@ -416,7 +533,9 @@ export function NetworkGraph({
       return n.toString();
     };
 
+    const companyTextDisplay = showCompanyTextRef.current ? null : "none";
     cG.append("text")
+      .attr("class", "company-text")
       .text(d => {
         const radius = getCompanyRadius(d);
         const maxLen = d.isUserCompany ? 25 : Math.max(8, Math.min(18, Math.floor(radius / 4)));
@@ -430,9 +549,12 @@ export function NetworkGraph({
         return Math.min(7 + sizeScale * 1.2, 13);
       })
       .attr("font-weight", d => d.isUserCompany ? 700 : 600)
-      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none");
+      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none")
+      .attr("display", companyTextDisplay);
 
-    cG.append("text").text(d => d.name === "Unbekannt" ? "" : formatSize(d.estimatedSize || 0))
+    cG.append("text")
+      .attr("class", "company-text")
+      .text(d => d.name === "Unbekannt" ? "" : formatSize(d.estimatedSize || 0))
       .attr("text-anchor", "middle").attr("dy", "1em")
       .attr("fill", P.textMuted)
       .attr("font-size", d => {
@@ -440,15 +562,19 @@ export function NetworkGraph({
         return Math.min(7 + sizeScale * 0.8, 12);
       })
       .attr("font-weight", 700)
-      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none");
+      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none")
+      .attr("display", companyTextDisplay);
 
-    cG.append("text").text(d => d.isUserCompany ? "MEINE FIRMA" : (d.name === "Unbekannt" ? `${d.memberCount} Kontakte` : `${d.memberCount} conn.`))
+    cG.append("text")
+      .attr("class", "company-text")
+      .text(d => d.isUserCompany ? "MEINE FIRMA" : (d.name === "Unbekannt" ? `${d.memberCount} Kontakte` : `${d.memberCount} conn.`))
       .attr("text-anchor", "middle").attr("dy", "2.2em")
       .attr("fill", d => d.isUserCompany ? ucColor + "80" : P.textDim)
       .attr("font-size", d => d.isUserCompany ? 8 : 6)
       .attr("font-weight", d => d.isUserCompany ? 600 : 500)
       .attr("letter-spacing", d => d.isUserCompany ? "1px" : "0")
-      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none");
+      .style("font-family", "'JetBrains Mono', monospace").attr("pointer-events", "none")
+      .attr("display", companyTextDisplay);
 
     // User bubble (rendered separately, larger and labeled)
     const userNode = nodes.find(n => n.type === "contact" && n.isUser);
@@ -499,8 +625,9 @@ export function NetworkGraph({
     // Contact dots (exclude user node, rendered above)
     const contactRadius = (d) => isLargeNetwork ? 1.5 + (d.normalizedInfluence || 0) * 4 : 2.5 + (d.normalizedInfluence || 0) * 7;
 
-    const contactGroup = g.append("g");
-    _contactGroup = contactGroup;
+    const contactGroup = g.append("g")
+      .attr("display", showContactDotsRef.current ? null : "none");
+    contactGroupRef.current = contactGroup;
 
     const cN = contactGroup.selectAll("circle").data(nodes.filter(n => n.type === "contact" && !n.isUser)).join("circle")
       .attr("r", contactRadius)
@@ -515,9 +642,11 @@ export function NetworkGraph({
         d3.select(this)
           .attr("r", contactRadius(d) * 1.8)
           .attr("opacity", 1);
-        // Always show this contact's links on hover
-        linkGroup.attr("display", null);
-        link.attr("display", l => (l.source.id === d.id || l.target.id === d.id) ? null : "none");
+        // Show this contact's links on hover (if lines toggle is on)
+        if (showContactLinesRef.current) {
+          linkGroup.attr("display", null);
+          link.attr("display", l => (l.source.id === d.id || l.target.id === d.id) ? null : "none");
+        }
         setSelectedContact(d);
       })
       .on("mouseout", function(_, d) {
@@ -526,8 +655,8 @@ export function NetworkGraph({
         d3.select(this)
           .attr("r", contactRadius(d))
           .attr("opacity", sc ? 1 : 0.85);
-        // Restore zoom-based visibility
-        if (currentZoomScale >= linkThreshold) {
+        // Restore toggle-based visibility
+        if (showContactLinesRef.current) {
           link.attr("display", null);
         } else {
           linkGroup.attr("display", "none");
@@ -536,7 +665,6 @@ export function NetworkGraph({
       .on("click", (_, d) => { onContactClick(d); })
       .call(drag);
     contactDotsRef.current = cN;
-    _cN = cN;
 
     // Node lookup for company links
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
@@ -544,12 +672,12 @@ export function NetworkGraph({
 
     sim.on("tick", () => {
       tickCount++;
-      // Update contact-to-company links every 3rd tick when visible
-      if (currentZoomScale >= linkThreshold && tickCount % 3 === 0) {
+      // Update contact-to-company links every 3rd tick
+      if (tickCount % 3 === 0) {
         link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
       }
 
-      companyLink.each(function(d) {
+      companyLink.each(function(d, i) {
         const sourceNode = nodeMap.get(typeof d.source === "object" ? d.source.id : d.source);
         const targetNode = nodeMap.get(typeof d.target === "object" ? d.target.id : d.target);
         if (sourceNode && targetNode) {
@@ -564,10 +692,12 @@ export function NetworkGraph({
           const x2 = targetNode.x - ux * tr;
           const y2 = targetNode.y - uy * tr;
           const curve = linkCurve.get(d) || 0;
+          let pathD, labelX, labelY;
           if (curve === 0) {
-            d3.select(this).attr("d", `M${x1},${y1}L${x2},${y2}`);
+            pathD = `M${x1},${y1}L${x2},${y2}`;
+            labelX = (x1 + x2) / 2;
+            labelY = (y1 + y2) / 2;
           } else {
-            // Use canonical direction so curves bow consistently regardless of link direction
             const sId = typeof d.source === "object" ? d.source.id : d.source;
             const tId = typeof d.target === "object" ? d.target.id : d.target;
             const flip = sId > tId ? -1 : 1;
@@ -575,19 +705,35 @@ export function NetworkGraph({
             const my = (y1 + y2) / 2;
             const cpx = mx + (-uy) * dist * curve * flip;
             const cpy = my + ux * dist * curve * flip;
-            d3.select(this).attr("d", `M${x1},${y1}Q${cpx},${cpy} ${x2},${y2}`);
+            pathD = `M${x1},${y1}Q${cpx},${cpy} ${x2},${y2}`;
+            // Bezier midpoint at t=0.5: B(0.5) = 0.25*P0 + 0.5*CP + 0.25*P2
+            labelX = 0.25 * x1 + 0.5 * cpx + 0.25 * x2;
+            labelY = 0.25 * y1 + 0.5 * cpy + 0.25 * y2;
+          }
+          d3.select(this).attr("d", pathD);
+          // Update hit area path
+          companyLinkHit.filter((_, idx) => idx === i).attr("d", pathD);
+          // Offset label slightly perpendicular to the line so it doesn't overlap
+          const perpX = -uy * 8;
+          const perpY = ux * 8;
+          const lx = labelX + perpX;
+          const ly = labelY + perpY;
+          // Update label text position
+          companyLinkLabel.filter((_, idx) => idx === i).attr("x", lx).attr("y", ly);
+          // Update background rect — measure text bounding box
+          const textNode = companyLinkLabel.filter((_, idx) => idx === i).node();
+          if (textNode) {
+            const bbox = textNode.getBBox();
+            const pad = 3;
+            companyLinkLabelBg.filter((_, idx) => idx === i)
+              .attr("x", bbox.x - pad).attr("y", bbox.y - pad)
+              .attr("width", bbox.width + pad * 2).attr("height", bbox.height + pad * 2);
           }
         }
       });
 
-      cG.attr("transform", d => {
-        const s = hoveredCompanyId.current === d.id ? 1.06 : 1;
-        return `translate(${d.x},${d.y}) scale(${s})`;
-      });
-      // Only update contact dot positions when they're visible
-      if (currentZoomScale >= contactThreshold) {
-        cN.attr("cx", d => d.x).attr("cy", d => d.y);
-      }
+      cG.attr("transform", d => `translate(${d.x},${d.y})`);
+      cN.attr("cx", d => d.x).attr("cy", d => d.y);
     });
 
     // Initial zoom
@@ -622,6 +768,41 @@ export function NetworkGraph({
       .call(zoomRef.current.transform, transform);
   }, [focusNode]);
 
+  // Toggle relationship labels visibility from external prop
+  useEffect(() => {
+    const label = companyLinkLabelRef.current;
+    const bg = companyLinkLabelBgRef.current;
+    if (!label || !bg) return;
+    if (showRelationshipLabels) {
+      label.attr("display", null);
+      bg.attr("display", null);
+    } else {
+      label.attr("display", "none");
+      bg.attr("display", "none");
+    }
+  }, [showRelationshipLabels]);
+
+  // Toggle contact dots visibility from external prop
+  useEffect(() => {
+    const group = contactGroupRef.current;
+    if (!group) return;
+    group.attr("display", showContactDots ? null : "none");
+  }, [showContactDots]);
+
+  // Toggle contact lines visibility from external prop
+  useEffect(() => {
+    const group = contactLinkGroupRef.current;
+    if (!group) return;
+    group.attr("display", showContactLines ? null : "none");
+  }, [showContactLines]);
+
+  // Toggle company bubble text visibility from external prop
+  useEffect(() => {
+    const g = gRef.current;
+    if (!g) return;
+    g.selectAll(".company-text").attr("display", showCompanyText ? null : "none");
+  }, [showCompanyText]);
+
   // Highlight big players and connected companies when a company is selected
   useEffect(() => {
     if (!gRef.current || !contactDotsRef.current || !nodesRef.current) return;
@@ -639,6 +820,22 @@ export function NetworkGraph({
       cN.attr("opacity", 0.85);
       if (cG) cG.transition().duration(300).attr("opacity", 1);
       if (cLinks) cLinks.transition().duration(300).attr("opacity", 1);
+      // Restore label opacity
+      const cLabel = companyLinkLabelRef.current;
+      const cLabelBg = companyLinkLabelBgRef.current;
+      if (cLabel) cLabel.transition().duration(300).attr("opacity", 1);
+      if (cLabelBg) cLabelBg.transition().duration(300).attr("opacity", 1);
+      // Restore zoom/toggle-based visibility
+      const contactGrp = contactGroupRef.current;
+      if (contactGrp) {
+        contactGrp.attr("display", showContactDotsRef.current ? null : "none");
+      }
+      const linkGrp = contactLinkGroupRef.current;
+      if (linkGrp) {
+        linkGrp.attr("display", showContactLinesRef.current ? null : "none");
+      }
+      // Restore company text toggle state
+      g.selectAll(".company-text").attr("display", showCompanyTextRef.current ? null : "none");
       return;
     }
 
@@ -673,15 +870,58 @@ export function NetworkGraph({
         .attr("opacity", d => d.isUserCompany || connectedIds.has(d.id) ? 1 : 0.12);
     }
 
-    // Dim company-to-company links (and their arrow markers) that don't involve the selected company
+    // Dim company-to-company links, arrows, and labels that don't involve the selected company
+    const isConnectedLink = d => {
+      const sId = typeof d.source === "object" ? d.source.id : d.source;
+      const tId = typeof d.target === "object" ? d.target.id : d.target;
+      return sId === selectedId || tId === selectedId;
+    };
     if (cLinks) {
       cLinks.transition().duration(300)
-        .attr("opacity", d => {
-          const sId = typeof d.source === "object" ? d.source.id : d.source;
-          const tId = typeof d.target === "object" ? d.target.id : d.target;
-          if (sId === selectedId || tId === selectedId) return 1;
-          return 0.07;
-        });
+        .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
+    }
+    const cLabel = companyLinkLabelRef.current;
+    const cLabelBg = companyLinkLabelBgRef.current;
+    if (cLabel) {
+      cLabel.transition().duration(300)
+        .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
+    }
+    if (cLabelBg) {
+      cLabelBg.transition().duration(300)
+        .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
+    }
+
+    // Force company text visible for selected + connected companies
+    if (cG) {
+      cG.selectAll(".company-text").attr("display", function() {
+        const d = d3.select(this.parentNode).datum();
+        return d.isUserCompany || connectedIds.has(d.id) ? null : "none";
+      });
+    }
+
+    // Force contact dots + lines visible for selected company (even if toggled off / zoomed out)
+    const contactGrp = contactGroupRef.current;
+    if (contactGrp) {
+      cN.attr("cx", d => d.x).attr("cy", d => d.y);
+      contactGrp.attr("display", null);
+    }
+    const linkGrp = contactLinkGroupRef.current;
+    const cLink = contactLinksRef.current;
+    if (linkGrp && cLink) {
+      cLink.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+           .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      linkGrp.attr("display", null);
+      // Only show lines for contacts in the selected/connected companies
+      cLink.attr("display", d => {
+        const sId = typeof d.source === "object" ? d.source.id : d.source;
+        const tId = typeof d.target === "object" ? d.target.id : d.target;
+        const sNode = nodesRef.current.find(n => n.id === sId);
+        const tNode = nodesRef.current.find(n => n.id === tId);
+        const sComp = sNode?.company || "";
+        const tComp = tNode?.company || "";
+        return (connectedNames.has(sComp) || connectedIds.has(sId)) &&
+               (connectedNames.has(tComp) || connectedIds.has(tId)) ? null : "none";
+      });
     }
 
     // Dim contacts: show selected + connected companies' contacts
@@ -1428,4 +1668,4 @@ export function NetworkGraph({
       <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />
     </div>
   );
-}
+});

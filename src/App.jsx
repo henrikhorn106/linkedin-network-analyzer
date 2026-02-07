@@ -172,6 +172,13 @@ export default function App() {
   const [industryFilter, setIndustryFilter] = useState("all");
   const [agarFullscreen, setAgarFullscreen] = useState(false);
   const [focusConnections, setFocusConnections] = useState(false);
+  const [showRelationshipLabels, setShowRelationshipLabels] = useState(true);
+  const [showContactDots, setShowContactDots] = useState(true);
+  const [showContactLines, setShowContactLines] = useState(true);
+  const [showCompanyText, setShowCompanyText] = useState(true);
+  const [showCompanyLinks, setShowCompanyLinks] = useState(true);
+  const [graphFullscreen, setGraphFullscreen] = useState(false);
+  const graphRef = useRef(null);
 
   // Listen for agar fullscreen toggle events
   useEffect(() => {
@@ -255,11 +262,8 @@ export default function App() {
   // Filter company links by relationship type
   const filteredCompanyLinks = useMemo(() => {
     if (companyLinkFilter === "all") return allCompanyLinks;
-    if (companyLinkFilter === "none") return [];
     return allCompanyLinks.filter(l => l.type === companyLinkFilter);
   }, [allCompanyLinks, companyLinkFilter]);
-
-  const showCompanyLinks = companyLinkFilter !== "none";
 
   // Company colors — stable hash per company name so colors don't shift on re-render
   const companyColors = useMemo(() => {
@@ -392,6 +396,41 @@ export default function App() {
     return <LoginScreen userName={currentUser?.name} />;
   }
 
+  const handleScreenshot = () => {
+    const svgEl = graphRef.current?.getSvgElement();
+    if (!svgEl) return;
+    const clone = svgEl.cloneNode(true);
+    const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bgRect.setAttribute("width", "100%");
+    bgRect.setAttribute("height", "100%");
+    bgRect.setAttribute("fill", P.bg);
+    clone.insertBefore(bgRect, clone.firstChild);
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(clone);
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const w = svgEl.clientWidth;
+      const h = svgEl.clientHeight;
+      const canvas = document.createElement("canvas");
+      canvas.width = w * 2;
+      canvas.height = h * 2;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(2, 2);
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "netzwerk.png";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }, "image/png");
+    };
+    img.src = url;
+  };
+
   // Render main app
   return (
     <div style={{
@@ -408,9 +447,9 @@ export default function App() {
 
       {/* Top bar */}
       <div style={{
-        transform: agarFullscreen ? "translateY(-100%)" : "translateY(0)",
+        transform: (agarFullscreen || graphFullscreen) ? "translateY(-100%)" : "translateY(0)",
         transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
-        marginBottom: agarFullscreen ? "-48px" : 0,
+        marginBottom: (agarFullscreen || graphFullscreen) ? "-48px" : 0,
         position: "relative",
         zIndex: 10,
       }}>
@@ -448,6 +487,7 @@ export default function App() {
         {/* Network visualization */}
         <div style={{ flex: 1, position: "relative", height: "100%" }}>
           <NetworkGraph
+              ref={graphRef}
               network={network}
               companyColors={companyColors}
               showCompanyLinks={showCompanyLinks}
@@ -460,6 +500,10 @@ export default function App() {
               userCompanyColor={company?.color || null}
               focusNode={focusNode}
               selectedCompany={selectedCompany}
+              showRelationshipLabels={showRelationshipLabels}
+              showContactDots={showContactDots}
+              showContactLines={showContactDots && showContactLines}
+              showCompanyText={showCompanyText}
             />
 
             {/* Overlays */}
@@ -497,14 +541,104 @@ export default function App() {
                 renderedNodes={network.contactNodes.length + network.companyNodes.length}
                 linkingMode={linkingMode}
               />
+
+              {/* Graph toolbar — bottom-right, left of sidebar */}
+              {(() => {
+                const tbtn = (active, onClick, title, icon) => (
+                  <button
+                    onClick={onClick}
+                    title={title}
+                    style={{
+                      width: 32, height: 32,
+                      background: active ? P.accent + "15" : P.surface + "CC",
+                      border: `1px solid ${active ? P.accent + "40" : P.border}`,
+                      borderRadius: 6, padding: 0,
+                      color: active ? P.accent : P.textMuted,
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      backdropFilter: "blur(8px)",
+                      transition: "all 0.15s",
+                    }}
+                  >{icon}</button>
+                );
+                const S = (ch) => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{ch}</svg>;
+                return (
+                  <div style={{
+                    position: "absolute", right: 12, bottom: 12,
+                    display: "flex", flexDirection: "column", gap: 4,
+                    background: P.surface + "99", border: `1px solid ${P.border}`,
+                    borderRadius: 8, padding: 4,
+                    backdropFilter: "blur(8px)",
+                  }}>
+                    {/* Visibility toggles */}
+                    {tbtn(showCompanyLinks,
+                      () => setShowCompanyLinks(!showCompanyLinks),
+                      showCompanyLinks ? "Beziehungen ausblenden" : "Beziehungen einblenden",
+                      S(<><path d="M2 8h4" /><path d="M10 8h4" /><circle cx="8" cy="8" r="2" /><path d="M2 4l3 2" /><path d="M13 4l-3 2" /><path d="M2 12l3-2" /><path d="M13 12l-3-2" /></>)
+                    )}
+                    {showCompanyLinks && tbtn(showRelationshipLabels,
+                      () => setShowRelationshipLabels(!showRelationshipLabels),
+                      showRelationshipLabels ? "Labels ausblenden" : "Labels einblenden",
+                      S(<><path d="M1 3.5h10l3.5 4.5-3.5 4.5H1V3.5z" /><line x1="5" y1="6.5" x2="8" y2="6.5" /><line x1="5" y1="9.5" x2="7" y2="9.5" /></>)
+                    )}
+                    {tbtn(showContactDots,
+                      () => setShowContactDots(!showContactDots),
+                      showContactDots ? "Kontakte ausblenden" : "Kontakte einblenden",
+                      S(<><circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none" /><circle cx="11" cy="4" r="1.5" fill="currentColor" stroke="none" /><circle cx="8" cy="10" r="1.5" fill="currentColor" stroke="none" /><circle cx="3" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="13" cy="11" r="1" fill="currentColor" stroke="none" /></>)
+                    )}
+                    {showContactDots && tbtn(showContactLines,
+                      () => setShowContactLines(!showContactLines),
+                      showContactLines ? "Verbindungen ausblenden" : "Verbindungen einblenden",
+                      S(<><circle cx="4" cy="4" r="1.5" fill="currentColor" stroke="none" /><circle cx="12" cy="4" r="1.5" fill="currentColor" stroke="none" /><circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none" /><line x1="4" y1="4" x2="12" y2="4" /><line x1="4" y1="4" x2="8" y2="12" /><line x1="12" y1="4" x2="8" y2="12" /></>)
+                    )}
+                    {tbtn(showCompanyText,
+                      () => setShowCompanyText(!showCompanyText),
+                      showCompanyText ? "Firmennamen ausblenden" : "Firmennamen einblenden",
+                      S(<><text x="8" y="6" textAnchor="middle" fontSize="7" fill="currentColor" stroke="none" fontWeight="700" fontFamily="monospace">Aa</text><line x1="3" y1="10" x2="13" y2="10" /><line x1="4.5" y1="12.5" x2="11.5" y2="12.5" /></>)
+                    )}
+
+                    {/* Separator */}
+                    <div style={{ height: 1, background: P.border, margin: "2px 4px" }} />
+
+                    {/* Navigation */}
+                    {tbtn(false,
+                      () => graphRef.current?.centerOnCompany(),
+                      "Auf meine Firma zentrieren",
+                      S(<><circle cx="8" cy="8" r="3" /><line x1="8" y1="2" x2="8" y2="5" /><line x1="8" y1="11" x2="8" y2="14" /><line x1="2" y1="8" x2="5" y2="8" /><line x1="11" y1="8" x2="14" y2="8" /></>)
+                    )}
+                    {tbtn(false,
+                      () => graphRef.current?.zoomToFit(),
+                      "Alles anzeigen",
+                      S(<><path d="M2 5.5V3a1 1 0 011-1h2.5" /><path d="M10.5 2H13a1 1 0 011 1v2.5" /><path d="M14 10.5V13a1 1 0 01-1 1h-2.5" /><path d="M5.5 14H3a1 1 0 01-1-1v-2.5" /><rect x="5" y="5" width="6" height="6" rx="0.5" /></>)
+                    )}
+
+                    {/* Separator */}
+                    <div style={{ height: 1, background: P.border, margin: "2px 4px" }} />
+
+                    {/* Actions */}
+                    {tbtn(false,
+                      handleScreenshot,
+                      "Screenshot exportieren",
+                      S(<><rect x="2" y="4.5" width="12" height="9" rx="1.5" /><circle cx="8" cy="9.5" r="2.5" /><path d="M5.5 4.5L6.5 2.5h3l1 2" /></>)
+                    )}
+                    {tbtn(graphFullscreen,
+                      () => setGraphFullscreen(!graphFullscreen),
+                      graphFullscreen ? "Vollbild beenden" : "Vollbild",
+                      graphFullscreen
+                        ? S(<><path d="M5 2.5H2.5V5" /><path d="M11 2.5h2.5V5" /><path d="M13.5 11V13.5H11" /><path d="M2.5 11V13.5H5" /><line x1="2.5" y1="2.5" x2="6" y2="6" /><line x1="13.5" y1="2.5" x2="10" y2="6" /><line x1="13.5" y1="13.5" x2="10" y2="10" /><line x1="2.5" y1="13.5" x2="6" y2="10" /></>)
+                        : S(<><path d="M2 5.5V2.5h3" /><path d="M11 2.5h3V5.5" /><path d="M14 10.5v3h-3" /><path d="M5 13.5H2v-3" /></>)
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
           {/* Right panel */}
           <div style={{
-            transform: agarFullscreen ? "translateX(100%)" : "translateX(0)",
+            transform: (agarFullscreen || graphFullscreen) ? "translateX(100%)" : "translateX(0)",
             transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), margin 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
-            marginLeft: agarFullscreen ? "-280px" : 0,
+            marginLeft: (agarFullscreen || graphFullscreen) ? "-280px" : 0,
             height: "100%",
             overflow: "hidden",
           }}>

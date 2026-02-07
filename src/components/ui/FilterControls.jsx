@@ -90,7 +90,6 @@ export function FilterControls({
           style={selectStyle}
         >
           <option value="all">Alle ({allCompanyLinks?.length || 0})</option>
-          <option value="none">Keine</option>
           {Object.entries(RELATIONSHIP_TYPES).map(([type, info]) =>
             linkCounts[type] ? (
               <option key={type} value={type}>{info.label} ({linkCounts[type]})</option>

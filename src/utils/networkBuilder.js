@@ -115,21 +115,16 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     companyMap[co].push(c);
   });
 
-  // Filter by minimum company size, but always include user's company
-  // When focusCompanyNames is set, ONLY show the user's company and directly connected companies
+  // Filter companies: min size + optionally restrict to directly connected
   const filteredCompanyMap = {};
   Object.entries(companyMap).forEach(([name, members]) => {
     const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
     const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
-    if (focusCompanyNames) {
-      // Exclusive filter: only user's company + connected companies
-      if (isUserCompany || isFocused) {
-        filteredCompanyMap[name] = members;
-      }
-    } else {
-      if (members.length >= minCompanySize || isUserCompany) {
-        filteredCompanyMap[name] = members;
-      }
+    // Must pass Direkt filter (if active)
+    if (focusCompanyNames && !isUserCompany && !isFocused) return;
+    // Must pass min company size filter
+    if (members.length >= minCompanySize || isUserCompany) {
+      filteredCompanyMap[name] = members;
     }
   });
 
@@ -159,8 +154,8 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
         industry,
       };
     })
-    // Filter by industry (always keep user's company and focused companies)
-    .filter(c => c.isUserCompany || industryFilter === "all" || c.industry === industryFilter || (focusCompanyNames && focusCompanyNames.has(c.name.trim().toLowerCase())))
+    // Filter by industry (always keep user's company)
+    .filter(c => c.isUserCompany || industryFilter === "all" || c.industry === industryFilter)
     // Sort so user's company comes first
     .sort((a, b) => (b.isUserCompany ? 1 : 0) - (a.isUserCompany ? 1 : 0));
 
