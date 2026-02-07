@@ -166,6 +166,14 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [focusNode, setFocusNode] = useState(null);
   const [industryFilter, setIndustryFilter] = useState("all");
+  const [agarFullscreen, setAgarFullscreen] = useState(false);
+
+  // Listen for agar fullscreen toggle events
+  useEffect(() => {
+    const onAgarFullscreen = (e) => setAgarFullscreen(e.detail?.active ?? false);
+    window.addEventListener("agar-fullscreen", onAgarFullscreen);
+    return () => window.removeEventListener("agar-fullscreen", onAgarFullscreen);
+  }, []);
 
   // Auto-adjust filters for large networks
   useEffect(() => {
@@ -361,31 +369,37 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
       {/* Top bar */}
-      <TopBar
-        contacts={contacts}
-        network={network}
-        minCompanySize={minCompanySize}
-        setMinCompanySize={setMinCompanySize}
-        seniorityFilter={seniorityFilter}
-        setSeniorityFilter={setSeniorityFilter}
-        companyLinkFilter={companyLinkFilter}
-        setCompanyLinkFilter={setCompanyLinkFilter}
-        allCompanyLinks={allCompanyLinks}
-        industryFilter={industryFilter}
-        setIndustryFilter={setIndustryFilter}
-        availableIndustries={network.allIndustries || []}
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        searchResults={searchResults}
-        setSelectedContact={setSelectedContact}
-        setSelectedCompany={setSelectedCompany}
-        onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
-        onCSVUpload={handleCSVUpload}
-        onShowAIChat={() => setShowAIChat(true)}
-        onShowAddContact={() => setShowAddContactModal(true)}
-        onShowAddCompany={() => setShowAddCompanyModal(true)}
-        onShowSettings={() => setShowSettings(true)}
-      />
+      <div style={{
+        transform: agarFullscreen ? "translateY(-100%)" : "translateY(0)",
+        transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+        marginBottom: agarFullscreen ? "-48px" : 0,
+      }}>
+        <TopBar
+          contacts={contacts}
+          network={network}
+          minCompanySize={minCompanySize}
+          setMinCompanySize={setMinCompanySize}
+          seniorityFilter={seniorityFilter}
+          setSeniorityFilter={setSeniorityFilter}
+          companyLinkFilter={companyLinkFilter}
+          setCompanyLinkFilter={setCompanyLinkFilter}
+          allCompanyLinks={allCompanyLinks}
+          industryFilter={industryFilter}
+          setIndustryFilter={setIndustryFilter}
+          availableIndustries={network.allIndustries || []}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchResults={searchResults}
+          setSelectedContact={setSelectedContact}
+          setSelectedCompany={setSelectedCompany}
+          onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
+          onCSVUpload={handleCSVUpload}
+          onShowAIChat={() => setShowAIChat(true)}
+          onShowAddContact={() => setShowAddContactModal(true)}
+          onShowAddCompany={() => setShowAddCompanyModal(true)}
+          onShowSettings={() => setShowSettings(true)}
+        />
+      </div>
 
       {/* Main content */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "100%" }}>
@@ -405,60 +419,72 @@ export default function App() {
             />
 
             {/* Overlays */}
-            <StatsCards
-              filteredContacts={network.filteredContacts}
-              companyCount={network.companyNodes.length}
-              cLevelCount={topInfluencers.filter(t => t.seniority >= 8).length}
-            />
-
-            {selectedContact && !selectedCompany && (
-              <ContactTooltip
-                contact={selectedContact}
-                onEdit={setEditingContact}
-                onDelete={deleteContact}
+            <div style={{
+              opacity: agarFullscreen ? 0 : 1,
+              pointerEvents: agarFullscreen ? "none" : "auto",
+              transition: "opacity 0.4s ease",
+            }}>
+              <StatsCards
+                filteredContacts={network.filteredContacts}
+                companyCount={network.companyNodes.length}
+                cLevelCount={topInfluencers.filter(t => t.seniority >= 8).length}
               />
-            )}
 
-            <Legend
-              showCompanyLinks={showCompanyLinks}
-              companyLinkCount={filteredCompanyLinks.length}
-            />
+              {selectedContact && !selectedCompany && (
+                <ContactTooltip
+                  contact={selectedContact}
+                  onEdit={setEditingContact}
+                  onDelete={deleteContact}
+                />
+              )}
 
-            <LinkingModeIndicator
-              linkingMode={linkingMode}
-              onCancel={() => setLinkingMode(null)}
-            />
+              <Legend
+                showCompanyLinks={showCompanyLinks}
+                companyLinkCount={filteredCompanyLinks.length}
+              />
 
-            <PerformanceHint
-              totalContacts={contacts.length}
-              renderedNodes={network.contactNodes.length + network.companyNodes.length}
-              linkingMode={linkingMode}
-            />
+              <LinkingModeIndicator
+                linkingMode={linkingMode}
+                onCancel={() => setLinkingMode(null)}
+              />
+
+              <PerformanceHint
+                totalContacts={contacts.length}
+                renderedNodes={network.contactNodes.length + network.companyNodes.length}
+                linkingMode={linkingMode}
+              />
+            </div>
           </div>
 
           {/* Right panel */}
-          <Sidebar
-            selectedCompany={selectedCompany}
-            setSelectedCompany={setSelectedCompany}
-            selectedContact={selectedContact}
-            setSelectedContact={setSelectedContact}
-            topInfluencers={topInfluencers}
-            companyNodes={network.companyNodes}
-            companyColors={companyColors}
-            companyRelationships={companyRelationships}
-            onStartLinking={startLinking}
-            onDeleteRelationship={deleteRelationship}
-            userCompany={company}
-            updateCompany={updateCompany}
-            renameCompany={dbRenameCompany}
-            deleteCompanyContacts={dbDeleteCompanyContacts}
-            onEditContact={setEditingContact}
-            onDeleteContact={deleteContact}
-            onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
-            contacts={contacts}
-            getCompanyEnrichment={getCompanyEnrichment}
-            saveCompanyEnrichment={saveCompanyEnrichment}
-          />
+          <div style={{
+            transform: agarFullscreen ? "translateX(100%)" : "translateX(0)",
+            transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), margin 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+            marginLeft: agarFullscreen ? "-280px" : 0,
+          }}>
+            <Sidebar
+              selectedCompany={selectedCompany}
+              setSelectedCompany={setSelectedCompany}
+              selectedContact={selectedContact}
+              setSelectedContact={setSelectedContact}
+              topInfluencers={topInfluencers}
+              companyNodes={network.companyNodes}
+              companyColors={companyColors}
+              companyRelationships={companyRelationships}
+              onStartLinking={startLinking}
+              onDeleteRelationship={deleteRelationship}
+              userCompany={company}
+              updateCompany={updateCompany}
+              renameCompany={dbRenameCompany}
+              deleteCompanyContacts={dbDeleteCompanyContacts}
+              onEditContact={setEditingContact}
+              onDeleteContact={deleteContact}
+              onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
+              contacts={contacts}
+              getCompanyEnrichment={getCompanyEnrichment}
+              saveCompanyEnrichment={saveCompanyEnrichment}
+            />
+          </div>
       </div>
 
       {/* Modals */}

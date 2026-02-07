@@ -22,6 +22,10 @@ export function NetworkGraph({
   const nodesRef = useRef(null);
   const contactDotsRef = useRef(null);
   const gRef = useRef(null);
+  const companyGroupsRef = useRef(null);
+  const contactLinksRef = useRef(null);
+  const companyLinksRef = useRef(null);
+  const userBubbleRef = useRef(null);
   const selectedCompanyRef = useRef(null);
   selectedCompanyRef.current = selectedCompany;
 
@@ -217,10 +221,38 @@ export function NetworkGraph({
 
     simulationRef.current = sim;
 
+    // Easter egg: hold timer integrated into drag (D3 drag intercepts mousedown)
+    let agarHoldTimer = null;
+    let agarDragStart = null;
     const drag = d3.drag()
-      .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
-      .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; });
+      .on("start", (e, d) => {
+        if (!e.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+        if (d.isUserCompany) {
+          agarDragStart = { x: e.x, y: e.y };
+          agarHoldTimer = setTimeout(() => {
+            agarHoldTimer = null;
+            svgRef.current?.dispatchEvent(new CustomEvent("agar-start"));
+          }, 5000);
+        }
+      })
+      .on("drag", (e, d) => {
+        d.fx = e.x; d.fy = e.y;
+        // Cancel hold if mouse moved more than 10px
+        if (agarHoldTimer && agarDragStart) {
+          const dx = e.x - agarDragStart.x;
+          const dy = e.y - agarDragStart.y;
+          if (Math.sqrt(dx * dx + dy * dy) > 10) {
+            clearTimeout(agarHoldTimer);
+            agarHoldTimer = null;
+          }
+        }
+      })
+      .on("end", (e, d) => {
+        if (!e.active) sim.alphaTarget(0);
+        d.fx = null; d.fy = null;
+        if (agarHoldTimer) { clearTimeout(agarHoldTimer); agarHoldTimer = null; }
+      });
 
     // Company-to-company links
     const companyLinkData = showCompanyLinks ? allCompanyLinks.filter(l => {
@@ -252,7 +284,7 @@ export function NetworkGraph({
       });
     });
 
-    const companyLink = g.append("g").selectAll("path").data(companyLinkData).join("path")
+    const companyLink = companyLinksRef.current = g.append("g").selectAll("path").data(companyLinkData).join("path")
       .attr("stroke", d => {
         if (d.type && RELATIONSHIP_TYPES[d.type]) {
           return RELATIONSHIP_TYPES[d.type].color;
@@ -271,7 +303,7 @@ export function NetworkGraph({
 
     // Contact-to-company links — hidden when zoomed out, visible when zoomed in
     const linkGroup = g.append("g");
-    const link = linkGroup.selectAll("line").data(links).join("line")
+    const link = contactLinksRef.current = linkGroup.selectAll("line").data(links).join("line")
       .attr("stroke", d => {
         const tid = typeof d.target === "object" ? d.target.id : d.target;
         return (companyColors[tid] || P.border) + "20";
@@ -283,7 +315,7 @@ export function NetworkGraph({
 
     // Company bubbles
     const hoveredCompanyId = { current: null };
-    const cG = g.append("g").selectAll("g").data(nodes.filter(n => n.type === "company")).join("g")
+    const cG = companyGroupsRef.current = g.append("g").selectAll("g").data(nodes.filter(n => n.type === "company")).join("g")
       .attr("cursor", linkingMode ? "crosshair" : "pointer")
       .on("click", (_, d) => onCompanyClick(d))
       .on("mouseover", function(_, d) {
@@ -419,7 +451,7 @@ export function NetworkGraph({
     // User bubble (rendered separately, larger and labeled)
     const userNode = nodes.find(n => n.type === "contact" && n.isUser);
     if (userNode) {
-      const uG = g.append("g").selectAll("g")
+      const uG = userBubbleRef.current = g.append("g").selectAll("g")
         .data([userNode]).join("g")
         .attr("cursor", "pointer")
         .on("click", (_, d) => { setSelectedContact(d); })
@@ -688,6 +720,656 @@ export function NetworkGraph({
       }
     };
   }, [selectedCompany, companyColors]);
+
+  // Easter egg: double-click your company → agar.io mode
+  useEffect(() => {
+    let active = false;
+    let cleanup = null;
+
+    const escHandler = (e) => {
+      if (active && e.key === "Escape" && cleanup) cleanup();
+    };
+
+    const agarStartHandler = () => {
+      if (active) return;
+      active = true;
+      cleanup = runAgar();
+    };
+
+    const formatTimer = (s) => {
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return `${m}:${sec.toString().padStart(2, "0")}`;
+    };
+
+    const runAgar = () => {
+      const g = gRef.current;
+      const cG = companyGroupsRef.current;
+      const cN = contactDotsRef.current;
+      const link = contactLinksRef.current;
+      const companyLink = companyLinksRef.current;
+      if (!g || !nodesRef.current || !cG) { active = false; return null; }
+
+      const nodes = nodesRef.current;
+      const userNode = nodes.find(n => n.type === "company" && n.isUserCompany);
+      if (!userNode) { active = false; return null; }
+
+      // Track alive companies
+      const others = nodes.filter(n => n.type === "company" && !n.isUserCompany);
+      const eaten = new Set();
+      let score = 0;
+
+      // Save original radii
+      const origRadii = {};
+      g.selectAll(".company-bubble").each(function(d) {
+        origRadii[d.id] = +d3.select(this).attr("r");
+      });
+
+      // Hide entire user company group (bubble + labels + corona)
+      cG.filter(d => d.isUserCompany).attr("opacity", 0);
+
+      // Hide user company's contacts and connections
+      const userCompanyName = userNode.id.replace("company_", "");
+      if (cN) cN.filter(d => d.company === userCompanyName)
+        .transition().duration(300).attr("r", 0).attr("opacity", 0);
+      if (link) link.filter(d => {
+        const sId = typeof d.source === "object" ? d.source.id : d.source;
+        const tId = typeof d.target === "object" ? d.target.id : d.target;
+        return sId === userNode.id || tId === userNode.id;
+      }).transition().duration(300).attr("opacity", 0);
+      if (companyLink) companyLink.filter(d => {
+        const sId = typeof d.source === "object" ? d.source.id : d.source;
+        const tId = typeof d.target === "object" ? d.target.id : d.target;
+        return sId === userNode.id || tId === userNode.id;
+      }).transition().duration(300).attr("opacity", 0);
+      const uG = userBubbleRef.current;
+      if (uG) uG.transition().duration(300).attr("opacity", 0);
+
+      // Disable hover/click on company bubbles during game
+      if (cG) cG.style("pointer-events", "none");
+
+      // Hide sidebar, top bar, and overlays
+      window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: true } }));
+
+      // Create agar cell overlay
+      const svgEl = svgRef.current;
+      const defs = d3.select(svgEl).select("defs");
+      const agarGroup = g.append("g").attr("class", "agar-easter-egg");
+      let cellR = origRadii[userNode.id] || 35;
+      let targetR = cellR;
+      let cellArea = Math.PI * cellR * cellR;
+      let cellX = userNode.x, cellY = userNode.y;
+      let mouseX = cellX, mouseY = cellY;
+      let frame = 0;
+      const cc = userCompanyColor || "#00E5A0";
+      const svgRect = svgEl.getBoundingClientRect();
+
+      // Unpin user company so simulation can still move things
+      userNode.fx = null;
+      userNode.fy = null;
+
+      // Give each company a smooth wander angle
+      const wanderAngles = new Map();
+      others.forEach(o => wanderAngles.set(o.id, Math.random() * Math.PI * 2));
+
+      // Disable manual zoom/pan during game
+      const svgSel = d3.select(svgEl);
+      svgSel.on(".zoom", null);
+
+      // Add flee force + smooth wandering
+      const sim = simulationRef.current;
+      if (sim) {
+        sim.force("agar-flee", () => {
+          others.forEach(other => {
+            if (eaten.has(other.id)) return;
+            // Smooth wandering: slowly rotate wander angle, apply gentle drift
+            let angle = wanderAngles.get(other.id);
+            angle += (Math.random() - 0.5) * 0.3;
+            wanderAngles.set(other.id, angle);
+            other.vx += Math.cos(angle) * 0.5;
+            other.vy += Math.sin(angle) * 0.5;
+            // Flee from agar cell
+            const dx = other.x - cellX;
+            const dy = other.y - cellY;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const fleeRadius = cellR * 3.5;
+            if (dist < fleeRadius) {
+              const strength = Math.pow(1 - dist / fleeRadius, 2) * 8;
+              other.vx += (dx / dist) * strength;
+              other.vy += (dy / dist) * strength;
+            }
+          });
+        });
+        // Keep some center gravity so companies stay in the playfield
+        sim.force("x", d3.forceX(svgRect.width / 2).strength(0.01));
+        sim.force("y", d3.forceY(svgRect.height / 2).strength(0.01));
+        sim.alpha(0.3).restart();
+      }
+
+      // Agar cell radial gradient
+      const agarGrad = defs.append("radialGradient").attr("id", "agar-cell-grad");
+      agarGrad.append("stop").attr("offset", "0%").attr("stop-color", cc).attr("stop-opacity", 0.6);
+      agarGrad.append("stop").attr("offset", "70%").attr("stop-color", cc).attr("stop-opacity", 0.3);
+      agarGrad.append("stop").attr("offset", "100%").attr("stop-color", cc).attr("stop-opacity", 0.1);
+
+      // Agar cell glow filter
+      const agarGlow = defs.append("filter").attr("id", "agar-glow")
+        .attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+      agarGlow.append("feGaussianBlur").attr("stdDeviation", "8").attr("result", "b");
+      const agm = agarGlow.append("feMerge");
+      agm.append("feMergeNode").attr("in", "b");
+      agm.append("feMergeNode").attr("in", "SourceGraphic");
+
+      // Outer glow ring
+      const cellGlow = agarGroup.append("circle")
+        .attr("cx", cellX).attr("cy", cellY)
+        .attr("r", cellR * 1.3)
+        .attr("fill", "none")
+        .attr("stroke", cc)
+        .attr("stroke-width", 1)
+        .attr("stroke-opacity", 0.2)
+        .attr("filter", "url(#agar-glow)");
+
+      // Cell body
+      const cell = agarGroup.append("circle")
+        .attr("cx", cellX).attr("cy", cellY)
+        .attr("r", cellR)
+        .attr("fill", "url(#agar-cell-grad)")
+        .attr("stroke", cc)
+        .attr("stroke-width", 2.5)
+        .attr("stroke-opacity", 0.8)
+        .attr("filter", "url(#agar-glow)");
+
+      // Membrane ring (pulsing)
+      const membrane = agarGroup.append("circle")
+        .attr("cx", cellX).attr("cy", cellY)
+        .attr("r", cellR)
+        .attr("fill", "none")
+        .attr("stroke", cc)
+        .attr("stroke-width", 1)
+        .attr("stroke-opacity", 0.4)
+        .attr("stroke-dasharray", "4,3");
+
+      // Name label on cell
+      const cellLabel = agarGroup.append("text")
+        .attr("x", cellX).attr("y", cellY)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "central")
+        .attr("fill", "#fff")
+        .attr("font-size", 11)
+        .attr("font-weight", 700)
+        .style("font-family", "'JetBrains Mono', monospace")
+        .attr("pointer-events", "none")
+        .text(userNode.name);
+
+      const totalTime = 30;
+      let timeLeft = totalTime;
+
+      // Fixed HUD (DOM elements pinned to viewport)
+      const font = "'JetBrains Mono', monospace";
+
+      const hudContainer = document.createElement("div");
+      hudContainer.className = "agar-hud";
+      Object.assign(hudContainer.style, {
+        position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
+        pointerEvents: "none", zIndex: 9998, fontFamily: font,
+      });
+      document.body.appendChild(hudContainer);
+
+      // Score box (top-right)
+      const scoreBox = document.createElement("div");
+      Object.assign(scoreBox.style, {
+        position: "absolute", top: "16px", right: "16px",
+        background: "rgba(0,0,0,0.6)", border: `1px solid ${cc}60`,
+        borderRadius: "8px", padding: "8px 20px", textAlign: "center",
+      });
+      const scoreEl = document.createElement("div");
+      Object.assign(scoreEl.style, { fontSize: "13px", fontWeight: 700, color: "#fff" });
+      scoreEl.textContent = "Score: 0";
+      const progressEl = document.createElement("div");
+      Object.assign(progressEl.style, { fontSize: "9px", fontWeight: 500, color: cc, marginTop: "2px" });
+      progressEl.textContent = `0 / ${others.length}`;
+      scoreBox.appendChild(scoreEl);
+      scoreBox.appendChild(progressEl);
+      hudContainer.appendChild(scoreBox);
+
+      // Timer box (below score)
+      const timerBox = document.createElement("div");
+      Object.assign(timerBox.style, {
+        position: "absolute", top: "72px", right: "16px",
+        background: "rgba(0,0,0,0.6)", border: `1px solid ${cc}60`,
+        borderRadius: "8px", padding: "6px 20px", textAlign: "center",
+      });
+      const timerEl = document.createElement("div");
+      Object.assign(timerEl.style, { fontSize: "18px", fontWeight: 700, color: "#fff" });
+      timerEl.textContent = formatTimer(totalTime);
+      timerBox.appendChild(timerEl);
+      hudContainer.appendChild(timerBox);
+
+      // ESC hint (bottom-right)
+      const escHint = document.createElement("div");
+      Object.assign(escHint.style, {
+        position: "absolute", bottom: "16px", right: "16px",
+        fontSize: "10px", color: "rgba(255,255,255,0.3)",
+      });
+      escHint.textContent = "ESC to quit";
+      hudContainer.appendChild(escHint);
+
+      // Particle burst helper
+      const spawnParticles = (x, y, color, count) => {
+        for (let i = 0; i < count; i++) {
+          const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+          const speed = 30 + Math.random() * 50;
+          const tx = x + Math.cos(angle) * speed;
+          const ty = y + Math.sin(angle) * speed;
+          const size = 2 + Math.random() * 4;
+          agarGroup.append("circle")
+            .attr("cx", x).attr("cy", y)
+            .attr("r", size)
+            .attr("fill", color)
+            .attr("opacity", 0.9)
+            .transition().duration(400 + Math.random() * 300)
+            .ease(d3.easeCubicOut)
+            .attr("cx", tx).attr("cy", ty)
+            .attr("r", 0).attr("opacity", 0)
+            .remove();
+        }
+      };
+
+      // Mouse tracking — convert screen coords to SVG coords
+      const onMouseMove = (e) => {
+        const svgEl = svgRef.current;
+        if (!svgEl) return;
+        const pt = svgEl.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+        const transform = g.node().getScreenCTM();
+        if (transform) {
+          const svgPt = pt.matrixTransform(transform.inverse());
+          mouseX = svgPt.x;
+          mouseY = svgPt.y;
+        }
+      };
+      window.addEventListener("mousemove", onMouseMove);
+
+      // Countdown: Ready, Set, GO! (DOM overlay for fullscreen)
+      const countdownDiv = document.createElement("div");
+      countdownDiv.className = "agar-countdown-overlay";
+      Object.assign(countdownDiv.style, {
+        position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.6)", zIndex: 9999, pointerEvents: "none",
+        fontFamily: "'JetBrains Mono', monospace",
+      });
+      document.body.appendChild(countdownDiv);
+
+      const showCountdown = (text, delay, color) => {
+        setTimeout(() => {
+          const el = document.createElement("div");
+          Object.assign(el.style, {
+            position: "absolute", color: color || "#fff",
+            fontSize: "80px", fontWeight: 700, opacity: 0,
+            transition: "all 0.2s ease-out",
+            textShadow: `0 0 30px ${color || "#fff"}`,
+          });
+          el.textContent = text;
+          countdownDiv.appendChild(el);
+          requestAnimationFrame(() => {
+            el.style.opacity = "1";
+            el.style.transform = "scale(1)";
+            setTimeout(() => {
+              el.style.transition = "all 0.5s ease-in";
+              el.style.opacity = "0";
+              el.style.transform = "scale(1.5)";
+              setTimeout(() => el.remove(), 500);
+            }, 300);
+          });
+        }, delay);
+      };
+
+      showCountdown("Ready", 0, "#fff");
+      showCountdown("Set", 800, cc);
+      showCountdown("GO!", 1600, "#FFD700");
+
+      // Remove countdown overlay after sequence
+      setTimeout(() => { countdownDiv.remove(); }, 2400);
+
+      // Start game loop after countdown
+      let gameLoopId = null;
+      let gameRunning = false;
+      const vw = svgRect.width, vh = svgRect.height;
+      const innerGlow = agarGroup.select(".agar-inner");
+      let camScale = d3.zoomTransform(svgEl).k;
+      let camX = d3.zoomTransform(svgEl).x;
+      let camY = d3.zoomTransform(svgEl).y;
+
+      const gameStep = () => {
+        if (!gameRunning) return;
+        frame++;
+
+        // Timer countdown
+        timeLeft -= 1 / 60;
+        if (frame % 3 === 0) {
+          timerEl.textContent = formatTimer(Math.max(0, timeLeft));
+          if (timeLeft <= 10) timerEl.style.color = timeLeft <= 5 ? "#EF4444" : "#F59E0B";
+        }
+        if (timeLeft <= 0) { endGame(null, true); return; }
+
+        // Follow mouse with gravity
+        cellX += (mouseX - cellX) * 0.15;
+        cellY += (mouseY - cellY) * 0.15;
+
+        // Smooth growth towards target radius
+        cellR += (targetR - cellR) * 0.12;
+
+        // Auto-camera: directly set g transform (bypasses zoom handler = no stutter)
+        const targetScale = Math.min(1.2, Math.max(0.15, (vh * 0.15) / cellR));
+        camScale += (targetScale - camScale) * 0.03;
+        const targetCamX = vw / 2 - cellX * camScale;
+        const targetCamY = vh / 2 - cellY * camScale;
+        camX += (targetCamX - camX) * 0.05;
+        camY += (targetCamY - camY) * 0.05;
+        g.attr("transform", `translate(${camX},${camY}) scale(${camScale})`);
+
+        // Keep simulation alive
+        if (sim && sim.alpha() < 0.03) sim.alpha(0.08).restart();
+
+        // Pulsing membrane
+        const pulse = 1 + Math.sin(frame * 0.08) * 0.03;
+        const membraneR = cellR * (1.05 + Math.sin(frame * 0.06) * 0.02);
+
+        // Update cell visuals
+        cell.attr("cx", cellX).attr("cy", cellY).attr("r", cellR * pulse);
+        cellGlow.attr("cx", cellX).attr("cy", cellY).attr("r", cellR * 1.3);
+        membrane.attr("cx", cellX).attr("cy", cellY).attr("r", membraneR)
+          .attr("stroke-dashoffset", frame * 0.5);
+        innerGlow.attr("cx", cellX).attr("cy", cellY).attr("r", cellR * 0.6);
+        const fontSize = Math.min(16, Math.max(9, cellR / 3.5));
+        cellLabel.attr("x", cellX).attr("y", cellY).attr("font-size", fontSize);
+
+        // Check collision
+        for (let i = 0; i < others.length; i++) {
+          const other = others[i];
+          if (eaten.has(other.id)) continue;
+          const otherR = origRadii[other.id] || 10;
+          const dx = other.x - cellX;
+          const dy = other.y - cellY;
+          const distSq = dx * dx + dy * dy;
+          const threshold = cellR - otherR * 0.3;
+
+          if (threshold > 0 && distSq < threshold * threshold) {
+            eaten.add(other.id);
+            score++;
+            scoreEl.textContent = `Score: ${score}`;
+            progressEl.textContent = `${score} / ${others.length}`;
+
+            // Grow
+            cellArea += Math.PI * otherR * otherR;
+            targetR = Math.sqrt(cellArea / Math.PI);
+
+            // Particle burst
+            const otherColor = companyColors[other.id] || cc;
+            spawnParticles(other.x, other.y, otherColor, 8);
+
+            // Shrink eaten company into the cell
+            const eatenG = cG.filter(d => d.id === other.id);
+            eatenG
+              .transition().duration(350).ease(d3.easeCubicIn)
+              .attr("transform", `translate(${cellX},${cellY}) scale(0)`)
+              .attr("opacity", 0);
+
+            const companyName = other.id.replace("company_", "");
+            if (cN) cN.filter(d => d.company === companyName)
+              .transition().duration(300).attr("r", 0).attr("opacity", 0);
+
+            if (link) link.filter(d => {
+              const sId = typeof d.source === "object" ? d.source.id : d.source;
+              const tId = typeof d.target === "object" ? d.target.id : d.target;
+              return sId === other.id || tId === other.id;
+            }).transition().duration(300).attr("opacity", 0);
+
+            if (companyLink) companyLink.filter(d => {
+              const sId = typeof d.source === "object" ? d.source.id : d.source;
+              const tId = typeof d.target === "object" ? d.target.id : d.target;
+              return sId === other.id || tId === other.id;
+            }).transition().duration(300).attr("opacity", 0);
+
+            // "+name" floating text
+            agarGroup.append("text")
+              .attr("x", other.x).attr("y", other.y)
+              .attr("text-anchor", "middle")
+              .attr("fill", otherColor)
+              .attr("font-size", 12)
+              .attr("font-weight", 700)
+              .style("font-family", "'JetBrains Mono', monospace")
+              .style("text-shadow", `0 0 6px ${otherColor}`)
+              .text(`+${other.name}`)
+              .transition().duration(1000).ease(d3.easeCubicOut)
+              .attr("y", other.y - 40)
+              .attr("opacity", 0)
+              .remove();
+          }
+        }
+
+        // Win condition
+        if (eaten.size >= others.length) {
+          endGame("NETZWERK DOMINIERT!", false);
+          return;
+        }
+        gameLoopId = requestAnimationFrame(gameStep);
+      };
+
+      const countdownTimer = setTimeout(() => {
+        gameRunning = true;
+        gameLoopId = requestAnimationFrame(gameStep);
+      }, 2400);
+
+      const endGame = (msg, isGameOver) => {
+        gameRunning = false;
+        clearTimeout(countdownTimer);
+        if (gameLoopId) cancelAnimationFrame(gameLoopId);
+        window.removeEventListener("mousemove", onMouseMove);
+
+        // Remove flee force and restore original center gravity
+        if (sim) {
+          sim.force("agar-flee", null);
+          sim.force("x", d3.forceX(svgRect.width / 2).strength(0.03));
+          sim.force("y", d3.forceY(svgRect.height / 2).strength(0.03));
+        }
+
+        // Sync D3 zoom internal state to match current camera, then re-enable
+        const zoom = zoomRef.current;
+        if (zoom) {
+          svgEl.__zoom = d3.zoomIdentity.translate(camX, camY).scale(camScale);
+          svgSel.call(zoom);
+        }
+
+        // Clean up agar-specific defs and HUD
+        defs.select("#agar-cell-grad").remove();
+        defs.select("#agar-glow").remove();
+        document.querySelector(".agar-countdown-overlay")?.remove();
+        hudContainer.style.transition = "opacity 0.4s ease";
+        hudContainer.style.opacity = "0";
+        setTimeout(() => hudContainer.remove(), 400);
+
+        const endScreenDelay = (msg || isGameOver) ? 4000 : 500;
+        const pct = others.length > 0 ? Math.round((score / others.length) * 100) : 0;
+        const elapsed = Math.round(totalTime - Math.max(0, timeLeft));
+
+        const buildEndScreen = (isVictory) => {
+          // Fullscreen DOM overlay
+          const overlay = document.createElement("div");
+          overlay.className = "agar-end-overlay";
+          Object.assign(overlay.style, {
+            position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0)", zIndex: 9999, pointerEvents: "none",
+            fontFamily: "'JetBrains Mono', monospace", transition: "background 0.5s ease",
+          });
+          document.body.appendChild(overlay);
+          requestAnimationFrame(() => { overlay.style.background = "rgba(0,0,0,0.7)"; });
+
+          // Title
+          const title = document.createElement("div");
+          Object.assign(title.style, {
+            fontSize: isVictory ? "56px" : "52px", fontWeight: 700, letterSpacing: "2px",
+            color: isVictory ? "#FFD700" : "#EF4444",
+            textShadow: isVictory ? "0 0 40px #FFD700, 0 0 80px #FFD70060" : "0 0 30px #EF4444, 0 0 60px #EF444440",
+            opacity: 0, transform: "scale(0.8) translateY(20px)",
+            transition: "all 0.5s cubic-bezier(0.34,1.56,0.64,1)",
+          });
+          title.textContent = isVictory ? "NETZWERK DOMINIERT!" : "GAME OVER";
+          overlay.appendChild(title);
+          setTimeout(() => { title.style.opacity = "1"; title.style.transform = "scale(1) translateY(0)"; }, 100);
+
+          // Subtitle
+          const subtitle = document.createElement("div");
+          Object.assign(subtitle.style, {
+            fontSize: "14px", fontWeight: 400, color: isVictory ? "#FFD700" : "#F59E0B",
+            opacity: 0, marginTop: "8px", letterSpacing: "4px", textTransform: "uppercase",
+            transition: "opacity 0.4s ease",
+          });
+          subtitle.textContent = isVictory ? "Alle Firmen absorbiert" : "Zeit abgelaufen";
+          overlay.appendChild(subtitle);
+          setTimeout(() => { subtitle.style.opacity = "0.7"; }, 400);
+
+          // Divider
+          const divider = document.createElement("div");
+          Object.assign(divider.style, {
+            width: "0px", height: "1px", marginTop: "28px", marginBottom: "24px",
+            background: `linear-gradient(90deg, transparent, ${isVictory ? "#FFD700" : "#ffffff"}40, transparent)`,
+            transition: "width 0.6s ease",
+          });
+          overlay.appendChild(divider);
+          setTimeout(() => { divider.style.width = "240px"; }, 300);
+
+          // Stats grid
+          const stats = document.createElement("div");
+          Object.assign(stats.style, {
+            display: "flex", gap: "40px", opacity: 0, transform: "translateY(10px)",
+            transition: "all 0.4s ease",
+          });
+
+          const addStat = (value, label) => {
+            const col = document.createElement("div");
+            Object.assign(col.style, { textAlign: "center" });
+            const val = document.createElement("div");
+            Object.assign(val.style, {
+              fontSize: "36px", fontWeight: 700,
+              color: isVictory ? "#FFD700" : "#fff",
+            });
+            val.textContent = value;
+            const lbl = document.createElement("div");
+            Object.assign(lbl.style, { fontSize: "10px", color: "#ffffff80", marginTop: "4px", textTransform: "uppercase", letterSpacing: "1px" });
+            lbl.textContent = label;
+            col.appendChild(val);
+            col.appendChild(lbl);
+            stats.appendChild(col);
+          };
+
+          addStat(`${score}/${others.length}`, "Firmen");
+          addStat(`${pct}%`, "Absorbiert");
+          addStat(`${elapsed}s`, "Zeit");
+
+          overlay.appendChild(stats);
+          setTimeout(() => { stats.style.opacity = "1"; stats.style.transform = "translateY(0)"; }, 600);
+
+          // Rating
+          const rating = document.createElement("div");
+          Object.assign(rating.style, {
+            marginTop: "24px", fontSize: "13px", color: "#ffffff60",
+            opacity: 0, transition: "opacity 0.4s ease",
+          });
+          const ratingText = pct === 100 ? "Perfekt!" : pct >= 75 ? "Beeindruckend!" : pct >= 50 ? "Nicht schlecht!" : pct >= 25 ? "Mehr Hunger?" : "Nochmal versuchen!";
+          rating.textContent = ratingText;
+          overlay.appendChild(rating);
+          setTimeout(() => { rating.style.opacity = "1"; }, 800);
+
+          // Clean up later
+          setTimeout(() => {
+            overlay.style.transition = "opacity 0.6s ease";
+            overlay.style.opacity = "0";
+            setTimeout(() => overlay.remove(), 600);
+          }, endScreenDelay - 600);
+        };
+
+        if (msg) {
+          // Victory — particle explosion in SVG
+          spawnParticles(cellX, cellY, "#FFD700", 20);
+          buildEndScreen(true);
+        }
+
+        if (isGameOver) {
+          // Cell shrink animation
+          cell.transition().duration(600)
+            .attr("r", 0).attr("opacity", 0);
+          membrane.transition().duration(600)
+            .attr("r", 0).attr("opacity", 0);
+          cellGlow.transition().duration(600)
+            .attr("r", 0).attr("opacity", 0);
+          cellLabel.transition().duration(400).attr("opacity", 0);
+
+          buildEndScreen(false);
+        }
+
+        // After delay, restore everything
+        setTimeout(() => {
+          agarGroup.transition().duration(500).attr("opacity", 0).remove();
+          document.querySelector(".agar-end-overlay")?.remove();
+
+          // Restore all company groups (bubbles + labels + corona + pointer events)
+          if (cG) {
+            cG.style("pointer-events", null);
+            cG.attr("transform", d => `translate(${d.x},${d.y}) scale(1)`);
+            cG.transition().duration(400).delay(() => Math.random() * 300)
+              .attr("opacity", 1);
+          }
+
+          // Restore contact dots
+          if (cN) cN.transition().duration(400).delay(() => Math.random() * 200)
+            .attr("opacity", 0.85);
+
+          // Restore contact-to-company links
+          if (link) link.transition().duration(300).attr("opacity", 1);
+
+          // Restore company-to-company arrows
+          if (companyLink) companyLink.transition().duration(300).attr("opacity", 1);
+
+          // Restore user "ICH" bubble
+          if (uG) uG.transition().duration(400).attr("opacity", 1);
+
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (rect && userNode) {
+            userNode.fx = rect.width / 2;
+            userNode.fy = rect.height / 2;
+          }
+
+          if (sim) sim.alpha(0.3).restart();
+
+          // Restore sidebar, top bar, and overlays
+          window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: false } }));
+
+          active = false;
+          cleanup = null;
+        }, endScreenDelay);
+      };
+
+      return () => endGame(null, false);
+    };
+
+    const svgEl = svgRef.current;
+    if (svgEl) {
+      svgEl.addEventListener("agar-start", agarStartHandler);
+    }
+    window.addEventListener("keydown", escHandler);
+    return () => {
+      if (svgEl) {
+        svgEl.removeEventListener("agar-start", agarStartHandler);
+      }
+      window.removeEventListener("keydown", escHandler);
+      if (cleanup) cleanup();
+    };
+  }, [userCompanyColor]);
 
   return (
     <div ref={containerRef} style={{
