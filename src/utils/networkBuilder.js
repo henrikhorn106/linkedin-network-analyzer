@@ -115,13 +115,21 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     companyMap[co].push(c);
   });
 
-  // Filter by minimum company size, but always include user's company and focused companies
+  // Filter by minimum company size, but always include user's company
+  // When focusCompanyNames is set, ONLY show the user's company and directly connected companies
   const filteredCompanyMap = {};
   Object.entries(companyMap).forEach(([name, members]) => {
     const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
     const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
-    if (members.length >= minCompanySize || isUserCompany || isFocused) {
-      filteredCompanyMap[name] = members;
+    if (focusCompanyNames) {
+      // Exclusive filter: only user's company + connected companies
+      if (isUserCompany || isFocused) {
+        filteredCompanyMap[name] = members;
+      }
+    } else {
+      if (members.length >= minCompanySize || isUserCompany) {
+        filteredCompanyMap[name] = members;
+      }
     }
   });
 

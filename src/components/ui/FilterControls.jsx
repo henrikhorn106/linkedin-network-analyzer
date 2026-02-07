@@ -115,7 +115,7 @@ export function FilterControls({
           fontFamily: "inherit",
           whiteSpace: "nowrap",
         }}
-        title="Verbundene Firmen immer anzeigen (Filter umgehen)"
+        title="Nur direkt verbundene Firmen anzeigen"
       >
         Direkt
       </button>

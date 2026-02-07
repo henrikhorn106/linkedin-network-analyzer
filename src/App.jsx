@@ -200,15 +200,15 @@ export default function App() {
   // Get all enrichment data for companies
   const companyEnrichments = useMemo(() => getAllCompanyEnrichments(), [getAllCompanyEnrichments, contacts]);
 
-  // Compute set of company names connected to user's company (for Fokus filter)
-  // Respects the Link type filter — only protects companies connected via the selected link type
+  // Compute set of company names connected to user's company (for Direkt filter)
+  // When a specific link type is selected, only shows companies connected via that type
   const focusCompanyNames = useMemo(() => {
-    if (!focusConnections || !company?.name || companyLinkFilter === "none") return null;
+    if (!focusConnections || !company?.name) return null;
     const userCompanyId = `company_${company.name}`;
     const names = new Set();
     companyRelationships.forEach(rel => {
-      // Skip if link type doesn't match the current filter
-      if (companyLinkFilter !== "all" && rel.type !== companyLinkFilter) return;
+      // When a specific link type is selected, only include that type
+      if (companyLinkFilter !== "all" && companyLinkFilter !== "none" && rel.type !== companyLinkFilter) return;
       if (rel.source === userCompanyId) {
         names.add(rel.target.replace(/^company_/, '').trim().toLowerCase());
       }
