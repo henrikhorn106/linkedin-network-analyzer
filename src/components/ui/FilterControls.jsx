@@ -43,6 +43,8 @@ export function FilterControls({
           onChange={(e) => setMinCompanySize(parseInt(e.target.value))}
           style={selectStyle}
         >
+          <option value={0}>Alle</option>
+          <option value={-1}>Nur 0</option>
           <option value={1}>1+</option>
           <option value={2}>2+</option>
           <option value={3}>3+</option>

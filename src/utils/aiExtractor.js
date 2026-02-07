@@ -143,7 +143,7 @@ export function extractWithRules(notes) {
  * Takes company name + rich context for better results
  */
 export async function enrichCompanyWithAI(companyName, context, apiKey) {
-  const { contacts = [], relationships = [], userCompany = null, estimatedSize = null, currentIndustry = null } = context;
+  const { contacts = [], relationships = [], userCompany = null, estimatedSize = null, currentIndustry = null, existingEnrichment = null } = context;
 
   // Build contact context with seniority analysis
   let contactSection = '';
@@ -198,10 +198,21 @@ export async function enrichCompanyWithAI(companyName, context, apiKey) {
 
   // Build existing data context
   let existingData = '';
-  if (estimatedSize || currentIndustry) {
+  const hasEnrichment = existingEnrichment && Object.keys(existingEnrichment).length > 0;
+  if (estimatedSize || currentIndustry || hasEnrichment) {
     existingData = '\n\nBereits bekannte Daten:';
     if (estimatedSize) existingData += `\n- Geschätzte Größe: ~${estimatedSize} Mitarbeiter`;
     if (currentIndustry) existingData += `\n- Branche (vermutet): ${currentIndustry}`;
+    if (hasEnrichment) {
+      if (existingEnrichment.description) existingData += `\n- Beschreibung: ${existingEnrichment.description}`;
+      if (existingEnrichment.website) existingData += `\n- Website: ${existingEnrichment.website}`;
+      if (existingEnrichment.headquarters) existingData += `\n- Hauptsitz: ${existingEnrichment.headquarters}`;
+      if (existingEnrichment.founded_year) existingData += `\n- Gründungsjahr: ${existingEnrichment.founded_year}`;
+      if (existingEnrichment.company_type) existingData += `\n- Firmentyp: ${existingEnrichment.company_type}`;
+      if (existingEnrichment.linkedin_url) existingData += `\n- LinkedIn: ${existingEnrichment.linkedin_url}`;
+      if (existingEnrichment.industry) existingData += `\n- Branche: ${existingEnrichment.industry}`;
+      if (existingEnrichment.estimated_size) existingData += `\n- Mitarbeiterzahl: ~${existingEnrichment.estimated_size}`;
+    }
   }
 
   const enrichmentSchema = {
@@ -256,7 +267,8 @@ Regeln:
 - Suche im Web nach der Firma und nutze die echten Daten
 - Jedes Feld MUSS einen Wert haben. Mache immer eine bestmögliche Schätzung.
 - estimated_size soll realistisch sein: Startup 5-50, Mittelstand 50-500, Enterprise 500+
-- Bevorzuge echte, verifizierte Daten aus der Websuche über Schätzungen`;
+- Bevorzuge echte, verifizierte Daten aus der Websuche über Schätzungen
+- Wenn bereits Daten vorhanden sind, aktualisiere und verbessere sie mit aktuellen Webdaten statt sie zu ignorieren`;
 
   const userPrompt = `Recherchiere die Firma "${companyName}" im Web und fülle alle Felder mit echten Daten.${existingData}${contactSection}${relationshipSection}${userContext}`;
 
@@ -314,4 +326,168 @@ export async function extractDataFromNotes(notes, apiKey) {
     }
   }
   return extractWithRules(notes);
+}
+
+/**
+ * OpenAI function/tool definitions for the agentic chat assistant
+ */
+export const CHAT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_contact",
+      description: "Erstelle einen neuen Kontakt im Netzwerk",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Vollständiger Name des Kontakts" },
+          company: { type: "string", description: "Firmenname des Kontakts" },
+          position: { type: "string", description: "Position/Titel des Kontakts (optional)" },
+        },
+        required: ["name", "company"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_company",
+      description: "Erstelle einen neuen Firmen-Platzhalter im Netzwerk",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Firmenname" },
+          estimatedSize: { type: "integer", description: "Geschätzte Mitarbeiterzahl (optional)" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_relationship",
+      description: "Erstelle eine Geschäftsbeziehung zwischen zwei Firmen",
+      parameters: {
+        type: "object",
+        properties: {
+          sourceCompany: { type: "string", description: "Name der Quell-Firma" },
+          targetCompany: { type: "string", description: "Name der Ziel-Firma" },
+          type: {
+            type: "string",
+            enum: ["lead", "customer", "partner", "investor", "competitor"],
+            description: "Art der Beziehung",
+          },
+        },
+        required: ["sourceCompany", "targetCompany", "type"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_contact",
+      description: "Aktualisiere einen bestehenden Kontakt (z.B. neue Position oder Firmenwechsel)",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Name des bestehenden Kontakts (zur Identifikation)" },
+          company: { type: "string", description: "Neuer Firmenname (optional, nur wenn sich die Firma aendert)" },
+          position: { type: "string", description: "Neue Position/Titel (optional, nur wenn sich die Position aendert)" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "enrich_company",
+      description: "Recherchiere eine Firma per Websuche und reichere sie mit Daten an (Beschreibung, Branche, Website, Hauptsitz, Gruendungsjahr, etc.)",
+      parameters: {
+        type: "object",
+        properties: {
+          companyName: { type: "string", description: "Name der Firma die angereichert werden soll" },
+        },
+        required: ["companyName"],
+      },
+    },
+  },
+];
+
+/**
+ * System prompt for the agentic assistant.
+ * Placeholders {existingCompanies} and {existingContactsSample} are filled at call time.
+ */
+export const AGENT_SYSTEM_PROMPT = `Du bist ein Netzwerk-Assistent für ein LinkedIn-Netzwerk-Analysetool. Du hilfst dem Nutzer, Kontakte, Firmen und Geschäftsbeziehungen aus Notizen und Gesprächen zu extrahieren und anzulegen.
+
+Du hast Zugriff auf folgende Tools:
+- create_contact: Neuen Kontakt erstellen
+- create_company: Neue Firma erstellen
+- create_relationship: Geschäftsbeziehung zwischen zwei Firmen erstellen (lead/customer/partner/investor/competitor)
+- update_contact: Bestehenden Kontakt aktualisieren (z.B. neue Position oder Firmenwechsel)
+- enrich_company: Firma per Websuche recherchieren und mit Daten anreichern (Beschreibung, Branche, Website, Hauptsitz, etc.)
+
+Regeln:
+- Antworte immer auf Deutsch
+- Wenn der Nutzer sagt, ein Kontakt hat eine neue Position oder Firma, nutze update_contact statt create_contact
+- Wenn der Nutzer Notizen teilt, extrahiere alle genannten Personen, Firmen und Beziehungen und nutze die passenden Tools
+- Wenn eine Firma nicht existiert aber als Beziehungspartner erwähnt wird, erstelle sie zuerst mit create_company
+- Bei create_relationship: "MEINE FIRMA" ist die Firma des Nutzers. Nutze den echten Firmennamen wenn bekannt
+- Schätze Firmengröße basierend auf Kontext (Startup: 10-50, Mittelstand: 50-500, Enterprise: 500+)
+- Position ist optional, nutze "Connection" als Standard wenn nicht bekannt
+- Wenn der Nutzer eine Firma erwähnt und mehr Informationen möchte (z.B. "recherchiere", "was weißt du über", "reichere an"), frage ob du die Firma per Websuche anreichern sollst, dann nutze enrich_company
+- Fasse deine Aktionen kurz zusammen nachdem du die Tools aufgerufen hast
+
+Bereits existierende Firmen im Netzwerk:
+{existingCompanies}
+
+Beispiel-Kontakte im Netzwerk (Auszug):
+{existingContactsSample}`;
+
+/**
+ * Send a conversational message to the LLM with full history and tool definitions.
+ * Returns the raw assistant message object (may contain content, tool_calls, or both).
+ */
+export async function agentChat(messages, apiKey, context = {}) {
+  const { existingCompanies = [], existingContactsSample = [] } = context;
+
+  const companiesStr = existingCompanies.length > 0
+    ? existingCompanies.slice(0, 30).join(", ")
+    : "(noch keine)";
+
+  const contactsStr = existingContactsSample.length > 0
+    ? existingContactsSample.slice(0, 10).map(c => `${c.name} (${c.company})`).join(", ")
+    : "(noch keine)";
+
+  const systemPrompt = AGENT_SYSTEM_PROMPT
+    .replace("{existingCompanies}", companiesStr)
+    .replace("{existingContactsSample}", contactsStr);
+
+  const apiMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages,
+  ];
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: apiMessages,
+      tools: CHAT_TOOLS,
+      temperature: 0.4,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || "API request failed");
+  }
+
+  const data = await response.json();
+  return data.choices[0]?.message;
 }

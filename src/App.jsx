@@ -130,7 +130,7 @@ export default function App() {
 
   // User & Company hooks
   const { user, isLoading: userLoading, deleteUser } = useUser();
-  const { company, updateCompany, deleteCompany, getCompanyEnrichment, getAllCompanyEnrichments, saveCompanyEnrichment } = useCompany(user?.id);
+  const { company, updateCompany, deleteCompany, getCompanyEnrichment, getAllCompanyEnrichments, saveCompanyEnrichment, deleteCompanyEnrichment } = useCompany(user?.id);
 
   // Contacts hook with userId
   const {
@@ -159,7 +159,7 @@ export default function App() {
   selectedCompanyRef.current = selectedCompany;
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [minCompanySize, setMinCompanySize] = useState(1);
+  const [minCompanySize, setMinCompanySize] = useState(0);
   const [seniorityFilter, setSeniorityFilter] = useState(0);
   const [companyLinkFilter, setCompanyLinkFilter] = useState("all");
   const [linkingMode, setLinkingMode] = useState(null);
@@ -523,6 +523,7 @@ export default function App() {
                 filteredContacts={network.filteredContacts}
                 companyCount={network.companyNodes.length}
                 cLevelCount={topInfluencers.filter(t => t.seniority >= 8).length}
+                noContactCompanyCount={network.companyNodes.filter(c => c.memberCount === 0 && !c.isUserCompany).length}
               />
 
               {selectedContact && (
@@ -670,6 +671,7 @@ export default function App() {
               contacts={contacts}
               getCompanyEnrichment={getCompanyEnrichment}
               saveCompanyEnrichment={saveCompanyEnrichment}
+              deleteCompanyEnrichment={deleteCompanyEnrichment}
             />
           </div>
       </div>
@@ -713,9 +715,15 @@ export default function App() {
         <AIChatAssistant
           onAddContact={addContact}
           onAddCompany={addContact}
+          onAddRelationship={addRelationship}
+          onUpdateContact={updateContact}
           existingContacts={contacts}
           existingCompanies={existingCompanies}
           onClose={() => setShowAIChat(false)}
+          getCompanyEnrichment={getCompanyEnrichment}
+          saveCompanyEnrichment={saveCompanyEnrichment}
+          companyRelationships={companyRelationships}
+          userCompany={company}
         />
       )}
     </div>

@@ -6,6 +6,7 @@ export function useCompany(userId) {
   const { isInitialized } = useDatabase();
   const [company, setCompany] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [enrichmentVersion, setEnrichmentVersion] = useState(0);
 
   const loadCompany = useCallback(() => {
     if (!isInitialized || !userId) return;
@@ -66,6 +67,7 @@ export function useCompany(userId) {
   }, [company]);
 
   // Get all company enrichments as a map { name: row }
+  // enrichmentVersion in deps ensures a new callback identity after save/delete
   const getAllCompanyEnrichments = useCallback(() => {
     if (!isInitialized || !userId) return {};
     try {
@@ -77,7 +79,7 @@ export function useCompany(userId) {
       console.error('Failed to get all company enrichments:', err);
       return {};
     }
-  }, [isInitialized, userId]);
+  }, [isInitialized, userId, enrichmentVersion]);
 
   // Get enrichment data for any company by name
   const getCompanyEnrichment = useCallback((companyName) => {
@@ -134,6 +136,7 @@ export function useCompany(userId) {
           existing.id,
         ]
       );
+      setEnrichmentVersion(v => v + 1);
       return { ...existing, ...d, enriched_at: now };
     } else {
       await execute(
@@ -153,9 +156,20 @@ export function useCompany(userId) {
           d.estimated_size,
         ]
       );
+      setEnrichmentVersion(v => v + 1);
       return { name: companyName, ...d, enriched_at: now };
     }
   }, [userId, getCompanyEnrichment]);
+
+  const deleteCompanyEnrichment = useCallback(async (companyName) => {
+    if (!userId) return;
+    try {
+      await execute('DELETE FROM companies WHERE user_id = ? AND name = ?', [userId, companyName]);
+      setEnrichmentVersion(v => v + 1);
+    } catch (err) {
+      console.error('Failed to delete company enrichment:', err);
+    }
+  }, [userId]);
 
   return {
     company,
@@ -167,5 +181,6 @@ export function useCompany(userId) {
     getCompanyEnrichment,
     getAllCompanyEnrichments,
     saveCompanyEnrichment,
+    deleteCompanyEnrichment,
   };
 }

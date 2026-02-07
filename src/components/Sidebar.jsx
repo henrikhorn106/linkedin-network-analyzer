@@ -44,6 +44,7 @@ export function Sidebar({
   contacts,
   getCompanyEnrichment,
   saveCompanyEnrichment,
+  deleteCompanyEnrichment,
 }) {
   // Format large numbers
   const formatSize = (n) => {
@@ -637,8 +638,12 @@ export function Sidebar({
                     <button
                       onClick={() => {
                         const count = selectedCompany.memberCount || 0;
-                        if (confirm(`"${selectedCompany.name}" und alle ${count} Kontakte wirklich löschen?`)) {
-                          deleteCompanyContacts(selectedCompany.name);
+                        const msg = count > 0
+                          ? `"${selectedCompany.name}" und alle ${count} Kontakte wirklich löschen?`
+                          : `"${selectedCompany.name}" wirklich löschen?`;
+                        if (confirm(msg)) {
+                          if (count > 0) deleteCompanyContacts(selectedCompany.name);
+                          if (deleteCompanyEnrichment) deleteCompanyEnrichment(selectedCompany.name);
                           setSelectedCompany(null);
                           setIsEditing(false);
                         }

@@ -1,7 +1,8 @@
 import { P } from '../../styles/theme';
 
-export function StatsCards({ filteredContacts, companyCount, cLevelCount }) {
+export function StatsCards({ filteredContacts, companyCount, cLevelCount, noContactCompanyCount = 0 }) {
   const stats = [
+    ...(noContactCompanyCount > 0 ? [{ label: "OHNE KONTAKTE", value: noContactCompanyCount, color: P.textMuted }] : []),
     { label: "KONTAKTE", value: filteredContacts },
     { label: "FIRMEN", value: companyCount },
     { label: "C-LEVEL", value: cLevelCount, color: P.gold },

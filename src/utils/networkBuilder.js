@@ -115,15 +115,28 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     companyMap[co].push(c);
   });
 
+  // Inject enriched-only companies (have enrichment data but zero contacts)
+  Object.keys(companyEnrichments).forEach(name => {
+    if (!companyMap[name]) {
+      companyMap[name] = [];
+    }
+  });
+
   // Filter companies: min size + optionally restrict to directly connected
   const filteredCompanyMap = {};
   Object.entries(companyMap).forEach(([name, members]) => {
     const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
     const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
+    const isEnriched = !!companyEnrichments[name];
     // Must pass Direkt filter (if active)
     if (focusCompanyNames && !isUserCompany && !isFocused) return;
-    // Must pass min company size filter
-    if (members.length >= minCompanySize || isUserCompany) {
+    // Must pass min company size filter (enriched companies always shown)
+    if (minCompanySize === -1) {
+      // "Nur 0" filter: only companies with 0 contacts (+ user's company)
+      if (members.length === 0 || isUserCompany) {
+        filteredCompanyMap[name] = members;
+      }
+    } else if (members.length >= minCompanySize || isUserCompany || isEnriched) {
       filteredCompanyMap[name] = members;
     }
   });
@@ -142,7 +155,7 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
       const customSize = members.find(m => m.customEstimatedSize)?.customEstimatedSize;
       const estimatedSize = enrichedSize || customSize || estimateCompanySize(name, members);
       const isUserCompany = userCompany && name.toLowerCase() === userCompany.toLowerCase();
-      const industry = inferIndustry(name, members);
+      const industry = companyEnrichments[name]?.industry || inferIndustry(name, members);
       return {
         id: `company_${name}`,
         name,
