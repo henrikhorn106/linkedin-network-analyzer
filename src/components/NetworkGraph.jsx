@@ -46,6 +46,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
   showCompanyTextRef.current = showCompanyText;
   const contactGroupRef = useRef(null);
   const contactLinkGroupRef = useRef(null);
+  const minimapRef = useRef(null);
+  const minimapInfoRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     zoomToFit: () => {
@@ -183,6 +185,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     const g = svg.append("g");
     gRef.current = g;
     let currentZoomScale = 1;
+    let cullFrame = null;
     const zoom = d3.zoom().scaleExtent([0.1, 4]).on("zoom", e => {
       g.attr("transform", e.transform);
       const prevScale = currentZoomScale;
@@ -201,9 +204,126 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
           d3.select(this).attr("stroke-width", base * scaleFactor);
         });
       }
+      // Viewport culling — debounced to avoid running every frame during fast pan
+      if (cullFrame) cancelAnimationFrame(cullFrame);
+      cullFrame = requestAnimationFrame(() => {
+        cullViewport(e.transform);
+        drawMinimap(e.transform);
+      });
     });
     svg.call(zoom);
+    // Initial generous bounds; tightened by drawMinimap once nodes have positions
+    zoom.translateExtent([[-width, -height], [width * 2, height * 2]]);
     zoomRef.current = zoom;
+
+    // Viewport culling: hide elements outside the visible screen for performance
+    const cullViewport = (transform) => {
+      if (!containerRef.current) return;
+      const r = containerRef.current.getBoundingClientRect();
+      const k = transform.k;
+      const tx = transform.x;
+      const ty = transform.y;
+      // Viewport bounds in world (simulation) coordinates, with margin
+      const margin = 200;
+      const vx0 = (-tx - margin) / k;
+      const vy0 = (-ty - margin) / k;
+      const vx1 = (r.width - tx + margin) / k;
+      const vy1 = (r.height - ty + margin) / k;
+
+      const inView = (x, y) => x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1;
+
+      // Cull company groups
+      if (companyGroupsRef.current) {
+        companyGroupsRef.current.each(function(d) {
+          this.style.display = (d.x != null && inView(d.x, d.y)) ? "" : "none";
+        });
+      }
+      // Cull contact dots
+      if (contactDotsRef.current && showContactDotsRef.current) {
+        contactDotsRef.current.each(function(d) {
+          this.style.display = (d.x != null && inView(d.x, d.y)) ? "" : "none";
+        });
+      }
+    };
+
+    // Minimap: draw company dots + viewport rect on canvas
+    const mmW = 260, mmH = 180;
+    const drawMinimap = (transform) => {
+      const canvas = minimapRef.current;
+      if (!canvas) return;
+      const ns = nodesRef.current;
+      if (!ns || ns.length === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== mmW * dpr) {
+        canvas.width = mmW * dpr;
+        canvas.height = mmH * dpr;
+      }
+
+      const ctx = canvas.getContext('2d');
+
+      // Compute world bounds from company nodes
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const n of ns) {
+        if (n.x == null || n.type !== 'company') continue;
+        x0 = Math.min(x0, n.x);
+        y0 = Math.min(y0, n.y);
+        x1 = Math.max(x1, n.x);
+        y1 = Math.max(y1, n.y);
+      }
+      if (!isFinite(x0)) return;
+
+      const pad = 300;
+      x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+
+      // Constrain panning to world bounds
+      zoom.translateExtent([[x0, y0], [x1, y1]]);
+
+      const bw = x1 - x0;
+      const bh = y1 - y0;
+      const sc = Math.min(mmW / bw, mmH / bh);
+      const offX = (mmW - bw * sc) / 2;
+      const offY = (mmH - bh * sc) / 2;
+
+      minimapInfoRef.current = { x0, y0, scale: sc, offsetX: offX, offsetY: offY };
+
+      ctx.clearRect(0, 0, mmW * dpr, mmH * dpr);
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // Company dots
+      for (const n of ns) {
+        if (n.x == null || n.type !== 'company') continue;
+        const x = (n.x - x0) * sc + offX;
+        const y = (n.y - y0) * sc + offY;
+        ctx.beginPath();
+        if (n.isUserCompany) {
+          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = userCompanyColor || P.accent;
+        } else {
+          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = (companyColors[n.id] || P.accent) + '90';
+        }
+        ctx.fill();
+      }
+
+      // Viewport rectangle
+      const k = transform.k;
+      const cr = containerRef.current?.getBoundingClientRect();
+      if (cr) {
+        const vx = (-transform.x / k - x0) * sc + offX;
+        const vy = (-transform.y / k - y0) * sc + offY;
+        const vw = (cr.width / k) * sc;
+        const vh = (cr.height / k) * sc;
+        ctx.strokeStyle = P.accent;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(vx, vy, vw, vh);
+        ctx.fillStyle = P.accent + '15';
+        ctx.fillRect(vx, vy, vw, vh);
+      }
+
+      ctx.restore();
+    };
 
     const allNodes = [
       ...network.companyNodes,
@@ -734,6 +854,13 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
       cG.attr("transform", d => `translate(${d.x},${d.y})`);
       cN.attr("cx", d => d.x).attr("cy", d => d.y);
+
+      // Periodic viewport culling during simulation (every 10th tick)
+      if (tickCount % 10 === 0) {
+        const t = d3.zoomTransform(svg.node());
+        cullViewport(t);
+        drawMinimap(t);
+      }
     });
 
     // Initial zoom
@@ -745,7 +872,10 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       );
     }, 800);
 
-    return () => sim.stop();
+    return () => {
+      sim.stop();
+      if (cullFrame) cancelAnimationFrame(cullFrame);
+    };
   }, [network, companyColors, showCompanyLinks, allCompanyLinks, linkingMode, onCompanyClick, onContactClick, setSelectedContact, userCompanyColor]);
 
   // Pan/zoom to focused node
@@ -1657,6 +1787,40 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     };
   }, [userCompanyColor]);
 
+  const onMinimapMouseDown = (e) => {
+    e.preventDefault();
+    const canvas = minimapRef.current;
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+
+    const nav = (clientX, clientY) => {
+      const info = minimapInfoRef.current;
+      const zoomB = zoomRef.current;
+      const svgEl = svgRef.current;
+      if (!info || !zoomB || !svgEl || !containerRef.current) return;
+      const mx = clientX - canvasRect.left;
+      const my = clientY - canvasRect.top;
+      const worldX = (mx - info.offsetX) / info.scale + info.x0;
+      const worldY = (my - info.offsetY) / info.scale + info.y0;
+      const cr = containerRef.current.getBoundingClientRect();
+      const k = d3.zoomTransform(svgEl).k;
+      const t = d3.zoomIdentity
+        .translate(cr.width / 2 - worldX * k, cr.height / 2 - worldY * k)
+        .scale(k);
+      d3.select(svgEl).call(zoomB.transform, t);
+    };
+
+    nav(e.clientX, e.clientY);
+
+    const onMove = (e2) => nav(e2.clientX, e2.clientY);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   return (
     <div ref={containerRef} style={{
       position: "absolute",
@@ -1666,6 +1830,26 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       bottom: 0,
     }}>
       <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />
+      {network.companyNodes.length > 0 && (
+        <canvas
+          ref={minimapRef}
+          width={260}
+          height={180}
+          onMouseDown={onMinimapMouseDown}
+          style={{
+            position: "absolute",
+            bottom: 85,
+            right: 65,
+            width: 260,
+            height: 180,
+            borderRadius: 6,
+            border: `1px solid ${P.border}`,
+            background: "rgba(10, 14, 20, 0.85)",
+            backdropFilter: "blur(8px)",
+            cursor: "pointer",
+          }}
+        />
+      )}
     </div>
   );
 });

@@ -5,12 +5,12 @@ export function Legend({ showCompanyLinks, companyLinkCount }) {
   return (
     <div style={{
       position: "absolute",
-      bottom: 14,
-      right: 290,
-      background: "rgba(6,10,18,0.85)",
-      backdropFilter: "blur(10px)",
+      bottom: 12,
+      right: 65,
+      background: P.surface + "99",
+      backdropFilter: "blur(8px)",
       border: `1px solid ${P.border}`,
-      borderRadius: 7,
+      borderRadius: 8,
       padding: "8px 14px",
     }}>
       <div style={{

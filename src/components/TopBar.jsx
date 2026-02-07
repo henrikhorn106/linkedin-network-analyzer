@@ -79,22 +79,19 @@ export function TopBar({
                 onClick={() => setShowFilters(!showFilters)}
                 title="Filter"
                 style={{
-                  background: showFilters ? P.accent + "15" : "transparent",
+                  width: 30, height: 30,
+                  background: showFilters ? P.accent + "15" : P.surface + "CC",
                   border: `1px solid ${showFilters ? P.accent + "40" : P.border}`,
-                  borderRadius: 5,
-                  padding: "4px 8px",
-                  fontSize: 9,
+                  borderRadius: 6, padding: 0,
                   color: showFilters ? P.accent : P.textMuted,
                   cursor: "pointer",
-                  fontFamily: "inherit",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  whiteSpace: "nowrap",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 0.15s",
                 }}
               >
-                <span style={{ fontSize: 10 }}>⚡</span>
-                Filter
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 3h12" /><path d="M4 6.5h8" /><path d="M6 10h4" /><path d="M7 13.5h2" />
+                </svg>
               </button>
 
               {/* Search */}
@@ -107,8 +104,10 @@ export function TopBar({
                   style={{
                     background: P.bg,
                     border: `1px solid ${P.border}`,
-                    borderRadius: 5,
-                    padding: "5px 10px",
+                    borderRadius: 6,
+                    padding: "0 10px",
+                    height: 30,
+                    boxSizing: "border-box",
                     color: P.text,
                     fontSize: 10,
                     fontFamily: "inherit",
@@ -178,75 +177,45 @@ export function TopBar({
 
           <CSVUpload onUpload={onCSVUpload} contactCount={contacts.length} />
 
-          {/* Compact action buttons */}
-          <div style={{ display: "flex", gap: 3 }}>
-            <button
-              onClick={onShowAIChat}
-              title="AI Assistent"
-              style={{
-                background: `linear-gradient(135deg, ${P.purple}30, ${P.blue}30)`,
-                border: `1px solid ${P.purple}60`,
-                borderRadius: 5,
-                padding: "4px 8px",
-                fontSize: 11,
-                color: P.purple,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              🤖
-            </button>
-            <button
-              onClick={onShowAddContact}
-              title="Kontakt hinzufügen"
-              style={{
-                background: P.accent + "15",
-                border: `1px solid ${P.accent}40`,
-                borderRadius: 5,
-                padding: "4px 8px",
-                fontSize: 10,
-                color: P.accent,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontWeight: 700,
-              }}
-            >
-              +
-            </button>
-            <button
-              onClick={onShowAddCompany}
-              title="Firma hinzufügen"
-              style={{
-                background: P.blue + "15",
-                border: `1px solid ${P.blue}40`,
-                borderRadius: 5,
-                padding: "4px 8px",
-                fontSize: 10,
-                color: P.blue,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontWeight: 700,
-              }}
-            >
-              ⬡
-            </button>
-            <button
-              onClick={onShowSettings}
-              title="Einstellungen"
-              style={{
-                background: "transparent",
-                border: `1px solid ${P.border}`,
-                borderRadius: 5,
-                padding: "4px 8px",
-                fontSize: 11,
-                color: P.textMuted,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              ⚙
-            </button>
-          </div>
+          {/* Action buttons — matching graph toolbar style */}
+          {(() => {
+            const tbtn = (onClick, title, icon, color) => (
+              <button
+                onClick={onClick}
+                title={title}
+                style={{
+                  width: 30, height: 30,
+                  background: P.surface + "CC",
+                  border: `1px solid ${P.border}`,
+                  borderRadius: 6, padding: 0,
+                  color: color || P.textMuted,
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 0.15s",
+                }}
+              >{icon}</button>
+            );
+            const S = (ch) => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{ch}</svg>;
+            return (
+              <>
+                {tbtn(onShowAIChat, "AI Assistent",
+                  S(<><circle cx="8" cy="8" r="5.5" /><circle cx="6" cy="7" r="0.8" fill="currentColor" stroke="none" /><circle cx="10" cy="7" r="0.8" fill="currentColor" stroke="none" /><path d="M6 10c0.5 0.8 1.2 1 2 1s1.5-0.2 2-1" /></>),
+                  P.purple
+                )}
+                {tbtn(onShowAddContact, "Kontakt hinzufügen",
+                  S(<><circle cx="8" cy="5.5" r="2.5" /><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" /><line x1="13" y1="3" x2="13" y2="7" /><line x1="11" y1="5" x2="15" y2="5" /></>),
+                  P.accent
+                )}
+                {tbtn(onShowAddCompany, "Firma hinzufügen",
+                  S(<><rect x="3" y="4" width="10" height="9" rx="1.5" /><line x1="3" y1="7.5" x2="13" y2="7.5" /><line x1="8" y1="4" x2="8" y2="13" /><path d="M6 2.5L8 1l2 1.5" /></>),
+                  P.blue
+                )}
+                {tbtn(onShowSettings, "Einstellungen",
+                  S(<><circle cx="8" cy="8" r="2" /><path d="M8 2.5v1.5" /><path d="M8 12v1.5" /><path d="M2.5 8H4" /><path d="M12 8h1.5" /><path d="M4.1 4.1l1.1 1.1" /><path d="M10.8 10.8l1.1 1.1" /><path d="M4.1 11.9l1.1-1.1" /><path d="M10.8 5.2l1.1-1.1" /></>)
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 

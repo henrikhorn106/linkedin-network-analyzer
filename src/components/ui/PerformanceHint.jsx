@@ -30,7 +30,7 @@ export function PerformanceHint({ totalContacts, renderedNodes, linkingMode }) {
       style={{
         position: "absolute",
         top: 14,
-        right: 290,
+        right: 12,
         background: "rgba(6,10,18,0.85)",
         backdropFilter: "blur(10px)",
         border: `1px solid ${color}30`,
