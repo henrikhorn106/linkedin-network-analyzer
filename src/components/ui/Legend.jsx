@@ -51,8 +51,8 @@ export function Legend({ showCompanyLinks, companyLinkCount }) {
           borderTop: `1px solid ${P.border}`,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <div style={{ width: 16, height: 2, background: P.purple, opacity: 0.5, borderRadius: 1 }} />
-            <span style={{ fontSize: 8, color: P.textMuted }}>Inferiert</span>
+            <div style={{ width: 16, height: 2, background: "#64748B", opacity: 0.5, borderRadius: 1 }} />
+            <span style={{ fontSize: 8, color: P.textMuted }}>Vermutet</span>
           </div>
           {Object.entries(RELATIONSHIP_TYPES).slice(0, 3).map(([type, info]) => (
             <div key={type} style={{ display: "flex", alignItems: "center", gap: 4 }}>

@@ -49,6 +49,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
   const minimapRef = useRef(null);
   const minimapInfoRef = useRef(null);
   const getCompanyRadiusRef = useRef(null);
+  const drawMinimapRef = useRef(null);
+  const agarActiveRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     zoomToFit: () => {
@@ -177,8 +179,10 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     // + black hole accretion disk rotation
     svg.append("style").text(`
       .sun-corona, .sun-corona-outer { transition: opacity 0.3s ease; }
-      @keyframes dash-flow { to { stroke-dashoffset: -20; } }
-      .company-link-inferred { animation: dash-flow 1.2s linear infinite; }
+      @keyframes link-flow { to { stroke-dashoffset: -24; } }
+      @keyframes inferred-flow { to { stroke-dashoffset: -16; } }
+      .company-link-flow { animation: link-flow 2s linear infinite; }
+      .company-link-inferred { animation: inferred-flow 1.5s linear infinite; }
       @keyframes bh-spin { to { stroke-dashoffset: -40; } }
       .bh-ring { animation: bh-spin 3s linear infinite; }
       @keyframes sun-orbit { to { stroke-dashoffset: -50; } }
@@ -198,7 +202,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       partner: { color: "#8B5CF6", bidir: true },
       investor: { color: "#3B82F6", bidir: false },
       competitor: { color: "#EF4444", bidir: true },
-      inferred: { color: P.purple, bidir: false },
+      inferred: { color: "#64748B", bidir: false },
     };
     const baseMarkerSize = 18;
     Object.entries(arrowTypes).forEach(([type, { color }]) => {
@@ -341,11 +345,28 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       ctx.save();
       ctx.scale(dpr, dpr);
 
+      // Build connected map: company ID → relationship color for minimap
+      const sel = selectedCompanyRef.current;
+      let connectedMap = null; // Map<id, color>
+      if (sel) {
+        connectedMap = new Map();
+        connectedMap.set(sel.id, null); // selected company itself, no relation color
+        allCompanyLinks.forEach(l => {
+          const sId = typeof l.source === "object" ? l.source.id : l.source;
+          const tId = typeof l.target === "object" ? l.target.id : l.target;
+          const relColor = (l.type && RELATIONSHIP_TYPES[l.type]) ? RELATIONSHIP_TYPES[l.type].color : P.purple;
+          if (sId === sel.id && !connectedMap.has(tId)) connectedMap.set(tId, relColor);
+          if (tId === sel.id && !connectedMap.has(sId)) connectedMap.set(sId, relColor);
+        });
+      }
+
       // Company dots
       for (const n of ns) {
         if (n.x == null || n.type !== 'company') continue;
         const x = (n.x - x0) * sc + offX;
         const y = (n.y - y0) * sc + offY;
+        const dimmed = connectedMap && !n.isUserCompany && !connectedMap.has(n.id);
+        ctx.globalAlpha = dimmed ? 0.15 : 1;
         if (n.name === 'Unbekannt') {
           // Black hole glow
           const grad = ctx.createRadialGradient(x, y, 0, x, y, 7);
@@ -373,12 +394,25 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
           ctx.fillStyle = userCompanyColor || P.accent;
           ctx.fill();
         } else {
+          const isSelected = sel && n.id === sel.id;
+          const relColor = connectedMap ? connectedMap.get(n.id) : null;
+          const dotColor = relColor || (companyColors[n.id] || P.accent);
+          // Connected companies get relation-colored dots; selected gets larger
           ctx.beginPath();
-          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
-          ctx.fillStyle = (companyColors[n.id] || P.accent) + '90';
+          ctx.arc(x, y, isSelected ? 3 : (relColor ? 2.5 : 1.5), 0, Math.PI * 2);
+          ctx.fillStyle = dotColor + (isSelected || relColor ? 'FF' : '90');
           ctx.fill();
+          // Selection ring around selected company
+          if (isSelected) {
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.strokeStyle = dotColor;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
         }
       }
+      ctx.globalAlpha = 1;
 
       // Viewport rectangle
       const k = transform.k;
@@ -397,6 +431,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
       ctx.restore();
     };
+    drawMinimapRef.current = drawMinimap;
 
     const allNodes = [
       ...network.companyNodes,
@@ -533,17 +568,24 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     });
 
     const companyLinkGroup = g.append("g");
+    // Set of companies that have at least one relationship connection
+    const linkedCompanyIds = new Set();
+    allCompanyLinks.forEach(l => {
+      linkedCompanyIds.add(typeof l.source === "object" ? l.source.id : l.source);
+      linkedCompanyIds.add(typeof l.target === "object" ? l.target.id : l.target);
+    });
+
     const companyLink = companyLinksRef.current = companyLinkGroup.selectAll("path.company-link-visible").data(companyLinkData).join("path")
-      .attr("class", d => `company-link-visible${d.type === "inferred" ? " company-link-inferred" : ""}`)
+      .attr("class", d => `company-link-visible${d.type === "inferred" ? " company-link-inferred" : " company-link-flow"}`)
       .attr("stroke", d => {
         if (d.type && RELATIONSHIP_TYPES[d.type]) {
           return RELATIONSHIP_TYPES[d.type].color;
         }
-        return P.purple;
+        return "#64748B";
       })
       .attr("stroke-width", d => 2 + (d.strength || 0.5) * 2)
-      .attr("opacity", d => d.type === "inferred" ? 0.3 : 0.65)
-      .attr("stroke-dasharray", d => d.type === "inferred" ? "5,5" : "none")
+      .attr("opacity", d => d.type === "inferred" ? 0.45 : 0.65)
+      .attr("stroke-dasharray", d => d.type === "inferred" ? "3,13" : "8,16")
       .attr("stroke-linecap", "round")
       .attr("fill", "none")
       .attr("marker-end", d => `url(#arrow-${getArrowType(d)})`)
@@ -793,14 +835,16 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       .attr("fill", d => {
         if (d.isUserCompany) return `${ucColor}30`;
         if (d.name === "Unbekannt") return "#030006";
-        return (companyColors[d.id] || P.accent) + "30";
+        const c = companyColors[d.id] || P.accent;
+        return c + (linkedCompanyIds.has(d.id) ? "60" : "18");
       })
       .attr("stroke", d => {
         if (d.isUserCompany) return ucColor;
         if (d.name === "Unbekannt") return "#7C3AED40";
-        return (companyColors[d.id] || P.accent) + "55";
+        const c = companyColors[d.id] || P.accent;
+        return c + (linkedCompanyIds.has(d.id) ? "BB" : "35");
       })
-      .attr("stroke-width", d => d.isUserCompany ? 2.5 : d.name === "Unbekannt" ? 2 : 1.5)
+      .attr("stroke-width", d => d.isUserCompany ? 2.5 : d.name === "Unbekannt" ? 2 : linkedCompanyIds.has(d.id) ? 2.5 : 1)
       .attr("filter", d => d.isUserCompany ? "url(#sun-glow)" : "none")
       .attr("class", d => d.isUserCompany ? "sun-glow-bubble sun-pulse" : "company-bubble");
 
@@ -1050,7 +1094,10 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         }
       });
 
-      cG.attr("transform", d => `translate(${d.x},${d.y})`);
+      cG.each(function(d) {
+        if (this.style.display === "none" || this.classList.contains("agar-eaten")) return;
+        this.setAttribute("transform", `translate(${d.x},${d.y})`);
+      });
       cN.attr("cx", d => d.x).attr("cy", d => d.y);
 
       // Periodic viewport culling during simulation (every 10th tick)
@@ -1134,6 +1181,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
   // Highlight big players and connected companies when a company is selected
   useEffect(() => {
     if (!gRef.current || !contactDotsRef.current || !nodesRef.current) return;
+    if (agarActiveRef.current) return; // skip selection mode during game
     const g = gRef.current;
     const cN = contactDotsRef.current;
     const cG = companyGroupsRef.current;
@@ -1165,6 +1213,10 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       }
       // Restore company text toggle state
       g.selectAll(".company-text").attr("display", showCompanyTextRef.current ? null : "none");
+      // Redraw minimap without selection dimming
+      if (drawMinimapRef.current && svgRef.current) {
+        drawMinimapRef.current(d3.zoomTransform(svgRef.current.node ? svgRef.current.node() : svgRef.current));
+      }
       return;
     }
 
@@ -1349,6 +1401,11 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       }
     }
 
+    // Redraw minimap with selection dimming + relation colors
+    if (drawMinimapRef.current && svgRef.current) {
+      drawMinimapRef.current(d3.zoomTransform(svgRef.current.node ? svgRef.current.node() : svgRef.current));
+    }
+
     // Update label positions on simulation tick
     const tickHandler = () => {
       bigPlayers.forEach((p, i) => {
@@ -1439,8 +1496,30 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       const uG = userBubbleRef.current;
       if (uG) uG.transition().duration(300).attr("opacity", 0);
 
-      // Disable hover/click on company bubbles during game
+      // Mark game as active and disable hover/click on company bubbles
+      agarActiveRef.current = true;
       if (cG) cG.style("pointer-events", "none");
+
+      // ── Game initial state: hide everything except company bubbles ──
+      // Relationship lines + labels + hit areas
+      if (companyLink) companyLink.transition().duration(300).attr("opacity", 0);
+      const clLabel = companyLinkLabelRef.current;
+      const clLabelBg = companyLinkLabelBgRef.current;
+      if (clLabel) clLabel.attr("display", "none");
+      if (clLabelBg) clLabelBg.attr("display", "none");
+      g.selectAll(".company-link-hit").attr("display", "none");
+      // Contact dots + contact links
+      const contactGrp = contactGroupRef.current;
+      if (contactGrp) contactGrp.attr("display", "none");
+      const linkGrp = contactLinkGroupRef.current;
+      if (linkGrp) linkGrp.attr("display", "none");
+      // Company text labels (name, size, count)
+      g.selectAll(".company-text").attr("display", "none");
+      // Sun corona/orbit rings
+      g.selectAll(".sun-corona, .sun-corona-outer, .sun-scalable").attr("display", "none");
+      // Black hole effects
+      g.selectAll(".bh-ring").attr("display", "none");
+      g.selectAll("[filter='url(#bh-glow)']").attr("display", "none");
 
       // Hide sidebar, top bar, and overlays
       window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: true } }));
@@ -1765,12 +1844,14 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             const otherColor = companyColors[other.id] || cc;
             spawnParticles(other.x, other.y, otherColor, 8);
 
-            // Shrink eaten company into the cell
+            // Shrink all elements of eaten company into the cell
             const eatenG = cG.filter(d => d.id === other.id);
+            eatenG.classed("agar-eaten", true); // flag so tick handler skips it
             eatenG
               .transition().duration(350).ease(d3.easeCubicIn)
               .attr("transform", `translate(${cellX},${cellY}) scale(0)`)
-              .attr("opacity", 0);
+              .attr("opacity", 0)
+              .on("end", function() { d3.select(this).style("display", "none"); });
 
             const companyName = other.id.replace("company_", "");
             if (cN) cN.filter(d => d.company === companyName)
@@ -1818,7 +1899,10 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         gameLoopId = requestAnimationFrame(gameStep);
       }, 2400);
 
+      let endGameCalled = false;
       const endGame = (msg, isGameOver) => {
+        if (endGameCalled) return;
+        endGameCalled = true;
         gameRunning = false;
         clearTimeout(countdownTimer);
         if (gameLoopId) cancelAnimationFrame(gameLoopId);
@@ -1973,21 +2057,45 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
           // Restore all company groups (bubbles + labels + corona + pointer events)
           if (cG) {
-            cG.style("pointer-events", null);
+            cG.classed("agar-eaten", false).style("pointer-events", null).style("display", null);
             cG.attr("transform", d => `translate(${d.x},${d.y}) scale(1)`);
             cG.transition().duration(400).delay(() => Math.random() * 300)
               .attr("opacity", 1);
           }
 
-          // Restore contact dots
-          if (cN) cN.transition().duration(400).delay(() => Math.random() * 200)
-            .attr("opacity", 0.85);
-
-          // Restore contact-to-company links
+          // Mark game as inactive
+          agarActiveRef.current = false;
+          // ── Restore game initial state: bring everything back ──
+          // Contact dots — reset radius and opacity
+          if (cN) {
+            const isLargeNet = (nodesRef.current?.length || 0) > 200;
+            const contactRadius = (d) => isLargeNet ? 1.5 + (d.normalizedInfluence || 0) * 4 : 2.5 + (d.normalizedInfluence || 0) * 7;
+            cN.attr("r", contactRadius)
+              .transition().duration(400).delay(() => Math.random() * 200)
+              .attr("opacity", 0.85);
+          }
+          // Contact-to-company links
           if (link) link.transition().duration(300).attr("opacity", 1);
-
-          // Restore company-to-company arrows
-          if (companyLink) companyLink.transition().duration(300).attr("opacity", 1);
+          // Company-to-company arrows
+          if (companyLink) companyLink.transition().duration(300).attr("opacity", d => d.type === "inferred" ? 0.45 : 0.65);
+          // Labels + hit areas
+          const clLabel2 = companyLinkLabelRef.current;
+          const clLabelBg2 = companyLinkLabelBgRef.current;
+          if (clLabel2) clLabel2.attr("display", showRelationshipLabelsRef.current ? null : "none");
+          if (clLabelBg2) clLabelBg2.attr("display", showRelationshipLabelsRef.current ? null : "none");
+          g.selectAll(".company-link-hit").attr("display", null);
+          // Contact groups — restore toggle state
+          const contactGrp2 = contactGroupRef.current;
+          if (contactGrp2) contactGrp2.attr("display", showContactDotsRef.current ? null : "none");
+          const linkGrp2 = contactLinkGroupRef.current;
+          if (linkGrp2) linkGrp2.attr("display", showContactLinesRef.current ? null : "none");
+          // Company text — restore toggle state
+          g.selectAll(".company-text").attr("display", showCompanyTextRef.current ? null : "none");
+          // Sun corona/orbit rings
+          g.selectAll(".sun-corona, .sun-corona-outer, .sun-scalable").attr("display", null);
+          // Black hole effects
+          g.selectAll(".bh-ring").attr("display", null);
+          g.selectAll("[filter='url(#bh-glow)']").attr("display", null);
 
           // Restore user "ICH" bubble
           if (uG) uG.transition().duration(400).attr("opacity", 1);
@@ -1999,6 +2107,22 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
           }
 
           if (sim) sim.alpha(0.3).restart();
+
+          // Re-apply selection state if a company was selected before the game
+          // Use setTimeout so the restore transitions finish first
+          setTimeout(() => {
+            const sel = selectedCompanyRef.current;
+            if (sel && onCompanyClick) {
+              // Force re-trigger by deselecting then reselecting
+              onCompanyClick(null);
+              requestAnimationFrame(() => onCompanyClick(sel));
+            }
+            // Redraw minimap
+            if (drawMinimapRef.current && svgRef.current) {
+              const svgNode = svgRef.current.node ? svgRef.current.node() : svgRef.current;
+              drawMinimapRef.current(d3.zoomTransform(svgNode));
+            }
+          }, 500);
 
           // Restore sidebar, top bar, and overlays
           window.dispatchEvent(new CustomEvent("agar-fullscreen", { detail: { active: false } }));
