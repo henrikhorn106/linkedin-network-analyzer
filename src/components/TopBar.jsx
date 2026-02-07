@@ -55,9 +55,18 @@ export function TopBar({
             width: 26, height: 26, borderRadius: 6,
             background: `linear-gradient(135deg, ${P.accent}, ${P.blue})`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 13, color: P.bg, fontWeight: 700, flexShrink: 0,
+            flexShrink: 0,
           }}>
-            ◈
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="4" cy="4" r="2" fill={P.bg} />
+              <circle cx="12" cy="4" r="1.5" fill={P.bg} />
+              <circle cx="8" cy="12" r="2" fill={P.bg} />
+              <circle cx="13" cy="11" r="1.2" fill={P.bg} />
+              <line x1="4" y1="4" x2="12" y2="4" stroke={P.bg} strokeWidth="1" strokeOpacity="0.7" />
+              <line x1="4" y1="4" x2="8" y2="12" stroke={P.bg} strokeWidth="1" strokeOpacity="0.7" />
+              <line x1="12" y1="4" x2="8" y2="12" stroke={P.bg} strokeWidth="1" strokeOpacity="0.7" />
+              <line x1="8" y1="12" x2="13" y2="11" stroke={P.bg} strokeWidth="0.8" strokeOpacity="0.5" />
+            </svg>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "#E8ECF2", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
