@@ -37,14 +37,15 @@ export function Sidebar({
   userCompany,
   updateCompany,
   renameCompany,
+  deleteCompany,
   deleteCompanyContacts,
   onEditContact,
   onDeleteContact,
   onFocusNode,
   contacts,
-  getCompanyEnrichment,
-  saveCompanyEnrichment,
-  deleteCompanyEnrichment,
+  companies,
+  getCompanyByName,
+  reloadCompanies,
 }) {
   // Format large numbers
   const formatSize = (n) => {
@@ -74,22 +75,20 @@ export function Sidebar({
   const [editLinkedinUrl, setEditLinkedinUrl] = useState('');
 
   // Enrichment state
-  const [enrichment, setEnrichment] = useState(null);
   const [isEnriching, setIsEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState(null);
   const [pendingEnrichment, setPendingEnrichment] = useState(null);
 
-  // Load enrichment when company changes
+  // Look up the full company row from the companies array (enrichment data lives on it)
+  const companyRow = selectedCompany
+    ? (companies || []).find(c => c.id === selectedCompany.numericId) || null
+    : null;
+
+  // Reset pending state when company changes
   useEffect(() => {
-    if (selectedCompany && getCompanyEnrichment) {
-      const data = getCompanyEnrichment(selectedCompany.name);
-      setEnrichment(data);
-    } else {
-      setEnrichment(null);
-    }
     setEnrichError(null);
     setPendingEnrichment(null);
-  }, [selectedCompany?.name, getCompanyEnrichment]);
+  }, [selectedCompany?.id]);
 
   const handleEnrich = async () => {
     if (!selectedCompany) return;
@@ -102,7 +101,7 @@ export function Sidebar({
     setEnrichError(null);
     try {
       const companyContacts = (contacts || []).filter(
-        c => c.company?.toLowerCase() === selectedCompany.name.toLowerCase()
+        c => c.companyId === selectedCompany.numericId
       );
 
       // Build relationship context with readable names
@@ -126,7 +125,7 @@ export function Sidebar({
         relationships: rels,
         userCompany: userCompany ? { name: userCompany.name, industry: userCompany.industry } : null,
         estimatedSize: selectedCompany.estimatedSize,
-        currentIndustry: enrichment?.industry || selectedCompany.industry || null,
+        currentIndustry: companyRow?.industry || selectedCompany.industry || null,
       };
 
       const result = await enrichCompanyWithAI(selectedCompany.name, context, apiKey);
@@ -139,20 +138,20 @@ export function Sidebar({
     }
   };
 
-  const isUserCompany = selectedCompany && userCompany && selectedCompany.name === userCompany.name;
+  const isUserCompany = selectedCompany && userCompany && selectedCompany.numericId === userCompany.id;
   const isUnknownCompany = selectedCompany && selectedCompany.name === "Unbekannt";
 
   const startEditing = () => {
     setEditName(selectedCompany.name);
-    setEditSize(selectedCompany.estimatedSize || '');
-    setEditIndustry(enrichment?.industry || (isUserCompany ? (userCompany.industry || '') : ''));
-    setEditColor(isUserCompany ? (userCompany.color || P.accent) : '');
-    setEditDescription(enrichment?.description || '');
-    setEditWebsite(enrichment?.website || '');
-    setEditHQ(enrichment?.headquarters || '');
-    setEditFoundedYear(enrichment?.founded_year || '');
-    setEditCompanyType(enrichment?.company_type || '');
-    setEditLinkedinUrl(enrichment?.linkedin_url || '');
+    setEditSize(selectedCompany.estimatedSize || companyRow?.estimated_size || '');
+    setEditIndustry(companyRow?.industry || '');
+    setEditColor(isUserCompany ? (companyRow?.color || P.accent) : '');
+    setEditDescription(companyRow?.description || '');
+    setEditWebsite(companyRow?.website || '');
+    setEditHQ(companyRow?.headquarters || '');
+    setEditFoundedYear(companyRow?.founded_year || '');
+    setEditCompanyType(companyRow?.company_type || '');
+    setEditLinkedinUrl(companyRow?.linkedin_url || '');
     setIsEditing(true);
   };
 
@@ -164,31 +163,31 @@ export function Sidebar({
     const newName = editName.trim();
     if (!newName) return;
     const newSize = editSize ? Number(editSize) : null;
-    const oldName = selectedCompany.name;
+    const companyId = selectedCompany.numericId;
 
     try {
-      if (isUserCompany) {
-        await updateCompany({ name: newName, estimated_size: newSize, industry: editIndustry || null, color: editColor || null });
+      if (companyId && companyId !== 0) {
+        // Update the company row directly (all enrichment data lives on the company)
+        const companyData = {
+          name: newName,
+          estimated_size: newSize,
+          industry: editIndustry || null,
+          description: editDescription.trim() || null,
+          website: editWebsite.trim() || null,
+          headquarters: editHQ.trim() || null,
+          founded_year: editFoundedYear ? Number(editFoundedYear) : null,
+          company_type: editCompanyType.trim() || null,
+          linkedin_url: editLinkedinUrl.trim() || null,
+        };
+        if (isUserCompany) {
+          companyData.color = editColor || null;
+        }
+        await updateCompany(companyId, companyData);
+        if (reloadCompanies) reloadCompanies();
       }
-      await renameCompany(oldName, newName, newSize);
-
-      // Save enrichment data for all companies
-      const enrichmentData = {
-        description: editDescription.trim() || null,
-        website: editWebsite.trim() || null,
-        headquarters: editHQ.trim() || null,
-        founded_year: editFoundedYear ? Number(editFoundedYear) : null,
-        company_type: editCompanyType.trim() || null,
-        linkedin_url: editLinkedinUrl.trim() || null,
-        industry: editIndustry || null,
-        estimated_size: newSize,
-      };
-      const saved = await saveCompanyEnrichment(newName, enrichmentData);
-      setEnrichment(saved);
 
       setSelectedCompany(prev => prev ? {
         ...prev,
-        id: `company_${newName}`,
         name: newName,
         estimatedSize: newSize || prev.estimatedSize,
       } : null);
@@ -439,55 +438,55 @@ export function Sidebar({
                       {selectedCompany.estimatedSize?.toLocaleString('de-DE')} Mitarbeiter
                     </span>
                   </div>
-                  {(enrichment?.industry || (isUserCompany && userCompany.industry)) && (
+                  {(companyRow?.industry || selectedCompany.industry) && (
                     <div style={{ fontSize: 10, color: P.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ color: P.textDim }}>Branche:</span>
                       <span style={{ color: P.text, fontWeight: 600 }}>
-                        {enrichment?.industry || userCompany?.industry}
+                        {companyRow?.industry || selectedCompany.industry}
                       </span>
                     </div>
                   )}
 
-                  {enrichment?.enriched_at && (
+                  {companyRow?.enriched_at && (
                     <div style={{
                       marginTop: 10, padding: 10, background: P.bg,
                       borderRadius: 7, border: `1px solid ${P.border}`,
                     }}>
-                      {enrichment.description && (
+                      {companyRow.description && (
                         <div style={{ fontSize: 10, color: P.text, lineHeight: 1.5, marginBottom: 8 }}>
-                          {enrichment.description}
+                          {companyRow.description}
                         </div>
                       )}
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                        {enrichment.company_type && (
+                        {companyRow.company_type && (
                           <span style={{
                             fontSize: 8, padding: "3px 7px", borderRadius: 10,
                             background: P.purple + "15", color: P.purple, fontWeight: 600,
                           }}>
-                            {enrichment.company_type}
+                            {companyRow.company_type}
                           </span>
                         )}
-                        {enrichment.headquarters && (
+                        {companyRow.headquarters && (
                           <span style={{
                             fontSize: 8, padding: "3px 7px", borderRadius: 10,
                             background: P.blue + "15", color: P.blue, fontWeight: 600,
                           }}>
-                            📍 {enrichment.headquarters}
+                            📍 {companyRow.headquarters}
                           </span>
                         )}
-                        {enrichment.founded_year && (
+                        {companyRow.founded_year && (
                           <span style={{
                             fontSize: 8, padding: "3px 7px", borderRadius: 10,
                             background: P.orange + "15", color: P.orange, fontWeight: 600,
                           }}>
-                            Gegr. {enrichment.founded_year}
+                            Gegr. {companyRow.founded_year}
                           </span>
                         )}
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                        {enrichment.website && (
+                        {companyRow.website && (
                           <a
-                            href={enrichment.website}
+                            href={companyRow.website}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
@@ -497,9 +496,9 @@ export function Sidebar({
                             Website ↗
                           </a>
                         )}
-                        {enrichment.linkedin_url && (
+                        {companyRow.linkedin_url && (
                           <a
-                            href={enrichment.linkedin_url}
+                            href={companyRow.linkedin_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
@@ -511,7 +510,7 @@ export function Sidebar({
                         )}
                       </div>
                       <div style={{ fontSize: 7, color: P.textDim, marginTop: 6 }}>
-                        Angereichert: {new Date(enrichment.enriched_at).toLocaleDateString('de-DE')}
+                        Angereichert: {new Date(companyRow.enriched_at).toLocaleDateString('de-DE')}
                       </div>
                     </div>
                   )}
@@ -521,10 +520,10 @@ export function Sidebar({
                     disabled={isEnriching}
                     style={{
                       width: "100%", marginTop: 10, padding: "7px 0",
-                      background: isEnriching ? P.border : (enrichment?.enriched_at ? P.bg : P.purple + "15"),
-                      border: `1px solid ${enrichment?.enriched_at ? P.border : P.purple + "40"}`,
+                      background: isEnriching ? P.border : (companyRow?.enriched_at ? P.bg : P.purple + "15"),
+                      border: `1px solid ${companyRow?.enriched_at ? P.border : P.purple + "40"}`,
                       borderRadius: 6,
-                      color: isEnriching ? P.textDim : (enrichment?.enriched_at ? P.textMuted : P.purple),
+                      color: isEnriching ? P.textDim : (companyRow?.enriched_at ? P.textMuted : P.purple),
                       fontSize: 9, fontWeight: 600,
                       cursor: isEnriching ? "wait" : "pointer",
                       fontFamily: "inherit",
@@ -532,7 +531,7 @@ export function Sidebar({
                       transition: "all 0.15s",
                     }}
                   >
-                    {isEnriching ? "WIRD ANGEREICHERT..." : (enrichment?.enriched_at ? "ERNEUT ANREICHERN" : "MIT KI ANREICHERN")}
+                    {isEnriching ? "WIRD ANGEREICHERT..." : (companyRow?.enriched_at ? "ERNEUT ANREICHERN" : "MIT KI ANREICHERN")}
                   </button>
                   {enrichError && (
                     <div style={{ fontSize: 8, color: P.red, marginTop: 4 }}>
@@ -600,12 +599,24 @@ export function Sidebar({
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                           <button
                             onClick={async () => {
-                              const saved = await saveCompanyEnrichment(selectedCompany.name, pendingEnrichment);
-                              setEnrichment(saved);
-                              const aiSize = pendingEnrichment.estimated_size ? Number(pendingEnrichment.estimated_size) : null;
-                              if (aiSize) {
-                                await renameCompany(selectedCompany.name, selectedCompany.name, aiSize);
-                                setSelectedCompany(prev => prev ? { ...prev, estimatedSize: aiSize } : null);
+                              if (selectedCompany.numericId && selectedCompany.numericId !== 0) {
+                                const enrichData = {
+                                  description: pendingEnrichment.description || null,
+                                  industry: pendingEnrichment.industry || null,
+                                  estimated_size: pendingEnrichment.estimated_size ? Number(pendingEnrichment.estimated_size) : null,
+                                  founded_year: pendingEnrichment.founded_year ? Number(pendingEnrichment.founded_year) : null,
+                                  company_type: pendingEnrichment.company_type || null,
+                                  headquarters: pendingEnrichment.headquarters || null,
+                                  website: pendingEnrichment.website || null,
+                                  linkedin_url: pendingEnrichment.linkedin_url || null,
+                                  enriched_at: new Date().toISOString(),
+                                };
+                                await updateCompany(selectedCompany.numericId, enrichData);
+                                if (reloadCompanies) reloadCompanies();
+                                const aiSize = enrichData.estimated_size;
+                                if (aiSize) {
+                                  setSelectedCompany(prev => prev ? { ...prev, estimatedSize: aiSize } : null);
+                                }
                               }
                               setPendingEnrichment(null);
                             }}
@@ -636,14 +647,15 @@ export function Sidebar({
 
                   {!isUserCompany && selectedCompany.name !== "Unbekannt" && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const count = selectedCompany.memberCount || 0;
                         const msg = count > 0
                           ? `"${selectedCompany.name}" und alle ${count} Kontakte wirklich löschen?`
                           : `"${selectedCompany.name}" wirklich löschen?`;
                         if (confirm(msg)) {
-                          if (count > 0) deleteCompanyContacts(selectedCompany.name);
-                          if (deleteCompanyEnrichment) deleteCompanyEnrichment(selectedCompany.name);
+                          if (selectedCompany.numericId && deleteCompany) {
+                            await deleteCompany(selectedCompany.numericId);
+                          }
                           setSelectedCompany(null);
                           setIsEditing(false);
                         }
@@ -1021,7 +1033,7 @@ export function Sidebar({
                 key={c.id}
                 onClick={() => {
                   setSelectedContact(c);
-                  const co = companyNodes.find(n => n.name === c.company);
+                  const co = companyNodes.find(n => n.id === c.companyNodeId);
                   setSelectedCompany(co || null);
                   onFocusNode?.(c.id);
                 }}

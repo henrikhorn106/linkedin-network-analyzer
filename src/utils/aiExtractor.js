@@ -182,8 +182,8 @@ export async function enrichCompanyWithAI(companyName, context, apiKey) {
   if (relationships.length > 0) {
     relationshipSection = `\n\nGeschäftsbeziehungen:`;
     relationships.forEach(r => {
-      const direction = r.source === `company_${companyName}` ? 'ist' : 'hat';
-      const otherName = r.source === `company_${companyName}` ? r.targetName : r.sourceName;
+      const direction = r.sourceName === companyName ? 'ist' : 'hat';
+      const otherName = r.sourceName === companyName ? r.targetName : r.sourceName;
       relationshipSection += `\n- ${direction} ${r.typeLabel} von/für ${otherName}`;
     });
   }

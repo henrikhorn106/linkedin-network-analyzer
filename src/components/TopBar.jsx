@@ -168,7 +168,7 @@ export function TopBar({
                             setSelectedContact(null);
                           } else {
                             setSelectedContact(c);
-                            const co = network.companyNodes.find(n => n.name === c.company);
+                            const co = network.companyNodes.find(n => n.id === c.companyNodeId);
                             setSelectedCompany(co || null);
                           }
                           setSearchTerm("");

@@ -42,7 +42,7 @@ function toolCallsToActions(toolCalls) {
   }).filter(Boolean);
 }
 
-export function AIChatAssistant({ onAddContact, onAddCompany, onAddRelationship, onUpdateContact, existingContacts, existingCompanies, onClose, getCompanyEnrichment, saveCompanyEnrichment, companyRelationships, userCompany }) {
+export function AIChatAssistant({ onAddContact, onCreateCompany, onAddRelationship, onUpdateContact, existingContacts, existingCompanies, companies, onClose, getCompanyByName, getOrCreateCompanyId, updateCompany, companyRelationships, userCompany }) {
   const [chatHistory, setChatHistory] = useState([]); // OpenAI-format messages
   const [displayMessages, setDisplayMessages] = useState([
     {
@@ -92,13 +92,9 @@ export function AIChatAssistant({ onAddContact, onAddCompany, onAddRelationship,
       return { success: true, message: `Kontakt "${action.data.name}" erstellt` };
     }
     if (action.type === 'company') {
-      onAddCompany({
-        id: `ai_company_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
-        name: `${action.data.name} (Firma)`,
-        company: action.data.name,
-        position: "Firma hinzugefuegt",
-        connectedOn: new Date().toLocaleDateString('de-DE'),
-        customEstimatedSize: action.data.estimatedSize,
+      await onCreateCompany({
+        name: action.data.name,
+        estimated_size: action.data.estimatedSize || null,
       });
       return { success: true, message: `Firma "${action.data.name}" erstellt` };
     }
@@ -106,9 +102,15 @@ export function AIChatAssistant({ onAddContact, onAddCompany, onAddRelationship,
       if (!onAddRelationship) {
         return { success: false, message: "Beziehungen koennen nicht erstellt werden" };
       }
+      // Resolve company names to numeric IDs
+      const srcCompany = getCompanyByName ? getCompanyByName(action.data.sourceCompany) : null;
+      const tgtCompany = getCompanyByName ? getCompanyByName(action.data.targetCompany) : null;
+      if (!srcCompany || !tgtCompany) {
+        return { success: false, message: `Firma "${!srcCompany ? action.data.sourceCompany : action.data.targetCompany}" nicht gefunden` };
+      }
       onAddRelationship({
-        source: `company_${action.data.sourceCompany}`,
-        target: `company_${action.data.targetCompany}`,
+        sourceCompanyId: srcCompany.id,
+        targetCompanyId: tgtCompany.id,
         type: action.data.relType,
       });
       return { success: true, message: `Beziehung "${action.data.sourceCompany}" \u2192 "${action.data.targetCompany}" (${action.data.relType}) erstellt` };
@@ -138,29 +140,24 @@ export function AIChatAssistant({ onAddContact, onAddCompany, onAddRelationship,
       }
       try {
         const companyName = action.data.companyName;
-        // Gather contacts for this company
-        const companyContacts = (existingContacts || []).filter(c =>
-          c.company?.trim().toLowerCase() === companyName.trim().toLowerCase()
-        );
-        // Get existing enrichment data
-        const existingEnrichment = getCompanyEnrichment ? getCompanyEnrichment(companyName) : null;
+        // Gather contacts for this company by looking up company ID
+        const companyObj = getCompanyByName ? getCompanyByName(companyName) : null;
+        const companyContacts = companyObj
+          ? (existingContacts || []).filter(c => c.companyId === companyObj.id)
+          : (existingContacts || []).filter(c => c.company?.trim().toLowerCase() === companyName.trim().toLowerCase());
         // Filter relationships relevant to this company
-        const companyId = `company_${companyName}`;
-        const relevantRelationships = (companyRelationships || []).filter(r =>
-          r.source === companyId || r.target === companyId
-        );
-        // Find estimated size from contacts
-        const companyContact = companyContacts.find(c => c.customEstimatedSize);
+        const companyNodeId = companyObj ? `company_${companyObj.id}` : null;
+        const relevantRelationships = companyNodeId
+          ? (companyRelationships || []).filter(r => r.source === companyNodeId || r.target === companyNodeId)
+          : [];
         const context = {
           contacts: companyContacts,
           relationships: relevantRelationships,
           userCompany: userCompany || null,
-          estimatedSize: companyContact?.customEstimatedSize || null,
-          currentIndustry: existingEnrichment?.industry || null,
-          existingEnrichment: existingEnrichment || null,
+          estimatedSize: companyObj?.estimated_size || null,
+          currentIndustry: companyObj?.industry || null,
         };
         const result = await enrichCompanyWithAI(companyName, context, key);
-        // Don't save yet — return data for user review
         const snippet = result.description ? result.description.slice(0, 80) + (result.description.length > 80 ? '...' : '') : '';
         return { success: true, message: `Daten fuer "${companyName}" gefunden: ${snippet}`, enrichmentResult: { companyName, data: result } };
       } catch (e) {
@@ -168,13 +165,18 @@ export function AIChatAssistant({ onAddContact, onAddCompany, onAddRelationship,
       }
     }
     if (action.type === 'save_enrichment') {
-      if (saveCompanyEnrichment) {
-        saveCompanyEnrichment(action.data.companyName, action.data.enrichmentData);
+      // Save enrichment data directly to the company row
+      const companyObj = getCompanyByName ? getCompanyByName(action.data.companyName) : null;
+      if (companyObj && updateCompany) {
+        await updateCompany(companyObj.id, {
+          ...action.data.enrichmentData,
+          enriched_at: new Date().toISOString(),
+        });
       }
       return { success: true, message: `Firmendaten fuer "${action.data.companyName}" gespeichert` };
     }
     return { success: false, message: "Unbekannte Aktion" };
-  }, [onAddContact, onAddCompany, onAddRelationship, onUpdateContact, existingContacts, apiKey, getCompanyEnrichment, saveCompanyEnrichment, companyRelationships, userCompany]);
+  }, [onAddContact, onCreateCompany, onAddRelationship, onUpdateContact, existingContacts, apiKey, getCompanyByName, updateCompany, companyRelationships, userCompany]);
 
   const callAgent = useCallback(async (history) => {
     const context = {

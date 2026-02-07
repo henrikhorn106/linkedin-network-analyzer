@@ -5,21 +5,13 @@ export function AddCompanyModal({ onAdd, onClose }) {
   const [name, setName] = useState("");
   const [estimatedSize, setEstimatedSize] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    // Add a placeholder contact for this company
-    onAdd({
-      id: `company_placeholder_${Date.now()}`,
-      name: `${name.trim()} (Firma)`,
-      company: name.trim(),
-      position: "Firma hinzugefügt",
-      connectedOn: new Date().toLocaleDateString('de-DE', {
-        day: '2-digit', month: 'short', year: 'numeric'
-      }),
-      isCompanyPlaceholder: true,
-      customEstimatedSize: estimatedSize ? parseInt(estimatedSize) : undefined,
+    await onAdd({
+      name: name.trim(),
+      estimated_size: estimatedSize ? parseInt(estimatedSize) : null,
     });
     onClose();
   };

@@ -25,37 +25,42 @@ export function OnboardingFlow({ onComplete }) {
     setError(null);
 
     try {
-      // Step 1: Create user with password
+      // Step 1: Create profile with password
       const { hash, salt } = await hashPassword(profileData.password);
       await execute(
-        'INSERT INTO users (name, email, role, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO profile (name, email, role, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)',
         [profileData.name, profileData.email || null, profileData.role || null, hash, salt]
       );
-      const userId = lastInsertRowId('users');
+      const userId = lastInsertRowId('profile');
 
       // Step 2: Create company
       await execute(
         'INSERT INTO companies (user_id, name, estimated_size, industry) VALUES (?, ?, ?, ?)',
         [userId, companyData.name, companyData.estimated_size || null, companyData.industry || null]
       );
+      const companyId = lastInsertRowId('companies');
 
-      // Step 3: Create user as first contact
+      // Step 3: Link profile to company
+      await execute(
+        'UPDATE profile SET company_id = ? WHERE id = ?',
+        [companyId, userId]
+      );
+
+      // Step 4: Create user as first contact (with company_id FK)
       const now = new Date().toLocaleDateString('de-DE', {
         day: '2-digit', month: 'short', year: 'numeric'
       });
 
       await execute(
-        `INSERT INTO contacts (user_id, external_id, name, company, position, connected_on, is_company_placeholder, custom_estimated_size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO contacts (user_id, external_id, name, company_id, position, connected_on)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
           userId,
           `user_${userId}`,
           profileData.name,
-          companyData.name,
+          companyId,
           profileData.role || 'Ich',
           now,
-          0,
-          companyData.estimated_size || null,
         ]
       );
 

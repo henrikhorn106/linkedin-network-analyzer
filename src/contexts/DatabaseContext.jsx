@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { initDatabase, hasUser, getUser, persistDatabase, query, execute } from '../db/database';
+import { initDatabase, hasProfile, getProfile, persistDatabase, query, execute } from '../db/database';
 import { hashPassword, verifyPassword } from '../utils/crypto';
 
 const DatabaseContext = createContext(null);
@@ -20,9 +20,9 @@ export function DatabaseProvider({ children }) {
       try {
         await initDatabase();
         if (mounted) {
-          const userExists = hasUser();
+          const userExists = hasProfile();
           if (userExists) {
-            const user = getUser();
+            const user = getProfile();
             setCurrentUser(user);
             // If user has no password set (legacy), auto-authenticate
             if (!user.password_hash) {
@@ -53,7 +53,7 @@ export function DatabaseProvider({ children }) {
   const completeOnboarding = useCallback(() => {
     setNeedsOnboarding(false);
     setIsAuthenticated(true);
-    const user = getUser();
+    const user = getProfile();
     setCurrentUser(user);
   }, []);
 
@@ -64,7 +64,7 @@ export function DatabaseProvider({ children }) {
 
   // Login with password
   const login = useCallback(async (password) => {
-    const user = getUser();
+    const user = getProfile();
     if (!user || !user.password_hash) return false;
     const valid = await verifyPassword(password, user.password_hash, user.password_salt);
     if (valid) {
@@ -81,11 +81,11 @@ export function DatabaseProvider({ children }) {
 
   // Set password for existing user without one
   const setUserPassword = useCallback(async (password) => {
-    const user = getUser();
+    const user = getProfile();
     if (!user) return;
     const { hash, salt } = await hashPassword(password);
     await execute(
-      'UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?',
+      'UPDATE profile SET password_hash = ?, password_salt = ? WHERE id = ?',
       [hash, salt, user.id]
     );
     setCurrentUser({ ...user, password_hash: hash, password_salt: salt });

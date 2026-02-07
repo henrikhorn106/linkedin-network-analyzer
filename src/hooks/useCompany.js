@@ -1,39 +1,50 @@
 import { useState, useCallback, useEffect } from 'react';
-import { query, execute, lastInsertRowId } from '../db/database';
+import { query, execute, lastInsertRowId, getOrCreateCompany } from '../db/database';
 import { useDatabase } from '../contexts/DatabaseContext';
 
+/**
+ * Hook for managing ALL companies (first-class entities).
+ * Derives userCompany from profile.company_id.
+ */
 export function useCompany(userId) {
   const { isInitialized } = useDatabase();
-  const [company, setCompany] = useState(null);
+  const [companies, setCompanies] = useState([]);
+  const [userCompany, setUserCompany] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [enrichmentVersion, setEnrichmentVersion] = useState(0);
 
-  const loadCompany = useCallback(() => {
+  const loadCompanies = useCallback(() => {
     if (!isInitialized || !userId) return;
     setIsLoading(true);
     try {
-      const companies = query(
-        'SELECT * FROM companies WHERE user_id = ? LIMIT 1',
-        [userId]
-      );
-      setCompany(companies[0] || null);
+      const rows = query('SELECT * FROM companies WHERE user_id = ? ORDER BY id', [userId]);
+      setCompanies(rows);
+
+      // Derive userCompany from profile.company_id
+      const profileRows = query('SELECT company_id FROM profile WHERE id = ?', [userId]);
+      const companyId = profileRows[0]?.company_id;
+      if (companyId) {
+        setUserCompany(rows.find(c => c.id === companyId) || null);
+      } else {
+        setUserCompany(null);
+      }
     } catch (err) {
-      console.error('Failed to load company:', err);
-      setCompany(null);
+      console.error('Failed to load companies:', err);
+      setCompanies([]);
+      setUserCompany(null);
     } finally {
       setIsLoading(false);
     }
   }, [isInitialized, userId]);
 
-  // Load company when database is initialized and userId changes
   useEffect(() => {
     if (isInitialized && userId) {
-      loadCompany();
+      loadCompanies();
     } else if (!userId) {
-      setCompany(null);
+      setCompanies([]);
+      setUserCompany(null);
       setIsLoading(false);
     }
-  }, [isInitialized, userId, loadCompany]);
+  }, [isInitialized, userId, loadCompanies]);
 
   const createCompany = useCallback(async (companyData) => {
     if (!userId) return null;
@@ -44,143 +55,78 @@ export function useCompany(userId) {
     );
     const id = lastInsertRowId('companies');
     const newCompany = { id, user_id: userId, name, estimated_size, industry, color };
-    setCompany(newCompany);
+    setCompanies(prev => [...prev, newCompany]);
     return newCompany;
   }, [userId]);
 
-  const updateCompany = useCallback(async (companyData) => {
-    if (!company) return null;
-    const { name, estimated_size, industry, color } = companyData;
-    await execute(
-      'UPDATE companies SET name = ?, estimated_size = ?, industry = ?, color = ? WHERE id = ?',
-      [name, estimated_size || null, industry || null, color !== undefined ? color : company.color || null, company.id]
-    );
-    const updatedCompany = { ...company, name, estimated_size, industry, color: color !== undefined ? color : company.color };
-    setCompany(updatedCompany);
-    return updatedCompany;
-  }, [company]);
-
-  const deleteCompany = useCallback(async () => {
-    if (!company) return;
-    await execute('DELETE FROM companies WHERE id = ?', [company.id]);
-    setCompany(null);
-  }, [company]);
-
-  // Get all company enrichments as a map { name: row }
-  // enrichmentVersion in deps ensures a new callback identity after save/delete
-  const getAllCompanyEnrichments = useCallback(() => {
-    if (!isInitialized || !userId) return {};
-    try {
-      const rows = query('SELECT * FROM companies WHERE user_id = ?', [userId]);
-      const map = {};
-      rows.forEach(r => { map[r.name] = r; });
-      return map;
-    } catch (err) {
-      console.error('Failed to get all company enrichments:', err);
-      return {};
-    }
-  }, [isInitialized, userId, enrichmentVersion]);
-
-  // Get enrichment data for any company by name
-  const getCompanyEnrichment = useCallback((companyName) => {
-    if (!isInitialized || !userId) return null;
-    try {
-      const rows = query(
-        'SELECT * FROM companies WHERE user_id = ? AND name = ? LIMIT 1',
-        [userId, companyName]
-      );
-      return rows[0] || null;
-    } catch (err) {
-      console.error('Failed to get company enrichment:', err);
-      return null;
-    }
-  }, [isInitialized, userId]);
-
-  // Save enrichment data for any company (upsert)
-  const saveCompanyEnrichment = useCallback(async (companyName, enrichmentData) => {
+  const updateCompany = useCallback(async (companyId, companyData) => {
     if (!userId) return null;
+    const existing = companies.find(c => c.id === companyId);
+    if (!existing) return null;
 
-    // Normalize: convert null/undefined to empty string for text fields
-    const d = {
-      description: enrichmentData.description || '',
-      website: enrichmentData.website || '',
-      headquarters: enrichmentData.headquarters || '',
-      founded_year: enrichmentData.founded_year || null,
-      company_type: enrichmentData.company_type || '',
-      linkedin_url: enrichmentData.linkedin_url || '',
-      industry: enrichmentData.industry || '',
-      estimated_size: enrichmentData.estimated_size || null,
-    };
-
-    const existing = getCompanyEnrichment(companyName);
-    const now = new Date().toISOString();
-
-    if (existing) {
-      await execute(
-        `UPDATE companies SET
-          description = ?, website = ?, headquarters = ?, founded_year = ?,
-          company_type = ?, linkedin_url = ?, enriched_at = ?,
-          industry = COALESCE(NULLIF(?, ''), industry),
-          estimated_size = COALESCE(?, estimated_size)
-        WHERE id = ?`,
-        [
-          d.description,
-          d.website,
-          d.headquarters,
-          d.founded_year,
-          d.company_type,
-          d.linkedin_url,
-          now,
-          d.industry,
-          d.estimated_size,
-          existing.id,
-        ]
-      );
-      setEnrichmentVersion(v => v + 1);
-      return { ...existing, ...d, enriched_at: now };
-    } else {
-      await execute(
-        `INSERT INTO companies (user_id, name, description, website, headquarters, founded_year, company_type, linkedin_url, enriched_at, industry, estimated_size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          userId,
-          companyName,
-          d.description,
-          d.website,
-          d.headquarters,
-          d.founded_year,
-          d.company_type,
-          d.linkedin_url,
-          now,
-          d.industry,
-          d.estimated_size,
-        ]
-      );
-      setEnrichmentVersion(v => v + 1);
-      return { name: companyName, ...d, enriched_at: now };
+    // Build dynamic SET clause from provided fields
+    const fields = [];
+    const values = [];
+    for (const [key, val] of Object.entries(companyData)) {
+      if (key === 'id' || key === 'user_id') continue;
+      fields.push(`${key} = ?`);
+      values.push(val !== undefined ? val : null);
     }
-  }, [userId, getCompanyEnrichment]);
+    if (fields.length === 0) return existing;
 
-  const deleteCompanyEnrichment = useCallback(async (companyName) => {
+    values.push(companyId);
+    await execute(
+      `UPDATE companies SET ${fields.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const updated = { ...existing, ...companyData };
+    setCompanies(prev => prev.map(c => c.id === companyId ? updated : c));
+    if (userCompany?.id === companyId) {
+      setUserCompany(updated);
+    }
+    return updated;
+  }, [userId, companies, userCompany]);
+
+  const deleteCompany = useCallback(async (companyId) => {
     if (!userId) return;
-    try {
-      await execute('DELETE FROM companies WHERE user_id = ? AND name = ?', [userId, companyName]);
-      setEnrichmentVersion(v => v + 1);
-    } catch (err) {
-      console.error('Failed to delete company enrichment:', err);
+    const id = companyId || userCompany?.id;
+    if (!id) return;
+    // Unlink contacts referencing this company
+    await execute('UPDATE contacts SET company_id = NULL WHERE company_id = ? AND user_id = ?', [id, userId]);
+    // Delete relations
+    await execute('DELETE FROM relations WHERE (source_company_id = ? OR target_company_id = ?) AND user_id = ?', [id, id, userId]);
+    await execute('DELETE FROM companies WHERE id = ? AND user_id = ?', [id, userId]);
+    setCompanies(prev => prev.filter(c => c.id !== id));
+    if (userCompany?.id === id) {
+      setUserCompany(null);
+      await execute('UPDATE profile SET company_id = NULL WHERE id = ?', [userId]);
     }
+  }, [userId, userCompany]);
+
+  // Get company by name (case-insensitive)
+  const getCompanyByName = useCallback((name) => {
+    if (!name) return null;
+    const lower = name.toLowerCase().trim();
+    return companies.find(c => c.name.toLowerCase().trim() === lower) || null;
+  }, [companies]);
+
+  // Get or create company ID by name
+  const getOrCreateCompanyId = useCallback(async (name) => {
+    if (!userId || !name?.trim()) return null;
+    return await getOrCreateCompany(userId, name);
   }, [userId]);
 
   return {
-    company,
+    companies,
+    company: userCompany,     // backward compat: "company" = user's company
+    userCompany,
     isLoading,
     createCompany,
     updateCompany,
     deleteCompany,
-    reloadCompany: loadCompany,
-    getCompanyEnrichment,
-    getAllCompanyEnrichments,
-    saveCompanyEnrichment,
-    deleteCompanyEnrichment,
+    getCompanyByName,
+    getOrCreateCompanyId,
+    reloadCompanies: loadCompanies,
   };
 }

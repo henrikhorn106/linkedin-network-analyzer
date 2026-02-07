@@ -1,19 +1,22 @@
-// SQL schema definitions for LinkedIn Network Analyzer
+// SQL schema definitions for LinkedIn Network Analyzer — v2
 
 export const SCHEMA_SQL = `
 -- User profile (single user, local-only)
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   email TEXT,
   role TEXT,
+  password_hash TEXT,
+  password_salt TEXT,
+  company_id INTEGER REFERENCES companies(id),
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Companies (user's own + enriched external)
+-- Companies (first-class entities)
 CREATE TABLE IF NOT EXISTS companies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES profile(id),
   name TEXT NOT NULL,
   estimated_size INTEGER,
   industry TEXT,
@@ -25,44 +28,41 @@ CREATE TABLE IF NOT EXISTS companies (
   company_type TEXT,
   linkedin_url TEXT,
   enriched_at TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- Contacts from LinkedIn / manual entry
 CREATE TABLE IF NOT EXISTS contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES profile(id),
   external_id TEXT UNIQUE,
   name TEXT NOT NULL,
-  company TEXT,
+  company_id INTEGER REFERENCES companies(id),
   position TEXT,
   connected_on TEXT,
-  is_company_placeholder INTEGER DEFAULT 0,
-  custom_estimated_size INTEGER,
   linkedin_url TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- Company-to-company relationships
-CREATE TABLE IF NOT EXISTS company_relationships (
+CREATE TABLE IF NOT EXISTS relations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  source_company TEXT NOT NULL,
-  target_company TEXT NOT NULL,
-  relationship_type TEXT NOT NULL,
-  created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  user_id INTEGER NOT NULL REFERENCES profile(id),
+  source_company_id INTEGER NOT NULL REFERENCES companies(id),
+  target_company_id INTEGER NOT NULL REFERENCES companies(id),
+  type TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Create indexes for better query performance
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
-CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company);
+CREATE INDEX IF NOT EXISTS idx_contacts_company_id ON contacts(company_id);
 CREATE INDEX IF NOT EXISTS idx_companies_user_id ON companies(user_id);
-CREATE INDEX IF NOT EXISTS idx_company_relationships_user_id ON company_relationships(user_id);
+CREATE INDEX IF NOT EXISTS idx_relations_user_id ON relations(user_id);
 `;
 
 // Database version for migrations
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 // IndexedDB configuration
 export const INDEXEDDB_NAME = 'linkedin-network-analyzer';

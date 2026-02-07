@@ -94,120 +94,149 @@ export function calculateSeniority(position) {
 }
 
 /**
- * Build network data structure from contacts
- * @param {Array} contacts - All contacts
+ * Build network data structure from contacts and companies.
+ * Companies are first-class entities; node IDs are `company_${numericId}`.
+ *
+ * @param {Array} contacts - All contacts (with .company string name and .companyId numeric FK)
+ * @param {Array} companies - All company rows from DB
  * @param {number} minCompanySize - Minimum contacts per company to show
- * @param {string} userCompany - User's own company name (always shown, centered)
+ * @param {number|null} userCompanyId - Numeric ID of user's own company
  * @param {string} industryFilter - Industry to filter by ("all" = no filter)
- * @param {Array} companyRelationships - Company-to-company relationships [{source, target, type}]
+ * @param {Array} companyRelationships - [{source, target, type}] where source/target are `company_${id}`
+ * @param {Set|null} focusCompanyIds - Set of numeric company IDs to focus on (null = show all)
  */
-export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = [], companyEnrichments = {}, focusCompanyNames = null) {
-  // Group contacts by company (case-insensitive, preserving first-seen casing)
-  const companyMap = {};
-  const companyCanonical = {}; // lowercase -> first-seen casing
+export function buildNetwork(contacts, companies = [], minCompanySize = 1, userCompanyId = null, industryFilter = "all", companyRelationships = [], focusCompanyIds = null) {
+  // Build a map of companyId -> company row for quick access
+  const companyById = {};
+  companies.forEach(c => { companyById[c.id] = c; });
+
+  // Group contacts by companyId
+  const contactsByCompanyId = {};
   contacts.forEach(c => {
-    const rawVal = c.company?.trim();
-    const raw = (!rawVal || rawVal === "Unknown") ? "Unbekannt" : rawVal;
-    const key = raw.toLowerCase();
-    if (!companyCanonical[key]) companyCanonical[key] = raw;
-    const co = companyCanonical[key];
-    if (!companyMap[co]) companyMap[co] = [];
-    companyMap[co].push(c);
+    const cid = c.companyId || 0;  // 0 = "Unbekannt"
+    if (!contactsByCompanyId[cid]) contactsByCompanyId[cid] = [];
+    contactsByCompanyId[cid].push(c);
   });
 
-  // Inject enriched-only companies (have enrichment data but zero contacts)
-  Object.keys(companyEnrichments).forEach(name => {
-    if (!companyMap[name]) {
-      companyMap[name] = [];
-    }
-  });
+  // Build company nodes from the companies array
+  const filteredCompanyNodes = [];
+  const companyMembersMap = {}; // id -> members array
 
-  // Filter companies: min size + optionally restrict to directly connected
-  const filteredCompanyMap = {};
-  Object.entries(companyMap).forEach(([name, members]) => {
-    const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
-    const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
-    const isEnriched = !!companyEnrichments[name];
-    // Must pass Direkt filter (if active)
-    if (focusCompanyNames && !isUserCompany && !isFocused) return;
-    // Must pass min company size filter (enriched companies always shown)
+  companies.forEach(co => {
+    const members = contactsByCompanyId[co.id] || [];
+    companyMembersMap[co.id] = members;
+    const isUserCompany = co.id === userCompanyId;
+    const isFocused = focusCompanyIds && focusCompanyIds.has(co.id);
+
+    // Direkt filter
+    if (focusCompanyIds && !isUserCompany && !isFocused) return;
+
+    // Min company size filter
     if (minCompanySize === -1) {
-      // "Nur 0" filter: only companies with 0 contacts (+ user's company)
-      if (members.length === 0 || isUserCompany) {
-        filteredCompanyMap[name] = members;
-      }
-    } else if (members.length >= minCompanySize || isUserCompany || isEnriched) {
-      filteredCompanyMap[name] = members;
+      if (members.length !== 0 && !isUserCompany) return;
+    } else if (members.length < minCompanySize && !isUserCompany) {
+      // Always show companies with enrichment data or non-zero estimated_size
+      if (!co.enriched_at && !co.estimated_size) return;
     }
+
+    const estimatedSize = co.estimated_size || estimateCompanySize(co.name, members);
+    const industry = co.industry || inferIndustry(co.name, members);
+
+    filteredCompanyNodes.push({
+      id: `company_${co.id}`,
+      numericId: co.id,
+      name: co.name,
+      type: "company",
+      memberCount: members.length,
+      members,
+      estimatedSize,
+      isUserCompany,
+      industry,
+    });
   });
 
-  // Ensure user's company always exists in the map, even with 0 filtered contacts
-  if (userCompany && !Object.keys(filteredCompanyMap).some(
-    name => name.trim().toLowerCase() === userCompany.trim().toLowerCase()
-  )) {
-    filteredCompanyMap[userCompany] = [];
+  // Handle contacts with no company (companyId=0 or null) — "Unbekannt" node
+  const unknownMembers = contactsByCompanyId[0] || [];
+  // Also collect contacts whose companyId doesn't match any company row
+  contacts.forEach(c => {
+    if (c.companyId && !companyById[c.companyId] && !unknownMembers.includes(c)) {
+      unknownMembers.push(c);
+    }
+  });
+  // Contacts with null companyId
+  const nullMembers = contactsByCompanyId[null] || contactsByCompanyId[undefined] || [];
+  nullMembers.forEach(m => { if (!unknownMembers.includes(m)) unknownMembers.push(m); });
+
+  if (unknownMembers.length > 0 && (minCompanySize <= unknownMembers.length || minCompanySize === -1)) {
+    filteredCompanyNodes.push({
+      id: 'company_0',
+      numericId: 0,
+      name: 'Unbekannt',
+      type: 'company',
+      memberCount: unknownMembers.length,
+      members: unknownMembers,
+      estimatedSize: estimateCompanySize('Unbekannt', unknownMembers),
+      isUserCompany: false,
+      industry: 'Sonstige',
+    });
   }
 
-  // Create company nodes with estimated sizes and industry
-  const companyNodes = Object.entries(filteredCompanyMap)
-    .map(([name, members]) => {
-      const enrichedSize = companyEnrichments[name]?.estimated_size;
-      const customSize = members.find(m => m.customEstimatedSize)?.customEstimatedSize;
-      const estimatedSize = enrichedSize || customSize || estimateCompanySize(name, members);
-      const isUserCompany = userCompany && name.toLowerCase() === userCompany.toLowerCase();
-      const industry = companyEnrichments[name]?.industry || inferIndustry(name, members);
-      return {
-        id: `company_${name}`,
-        name,
+  // Ensure user's company always exists
+  if (userCompanyId && !filteredCompanyNodes.some(c => c.numericId === userCompanyId)) {
+    const co = companyById[userCompanyId];
+    if (co) {
+      const members = contactsByCompanyId[co.id] || [];
+      filteredCompanyNodes.push({
+        id: `company_${co.id}`,
+        numericId: co.id,
+        name: co.name,
         type: "company",
         memberCount: members.length,
         members,
-        estimatedSize,
-        isUserCompany,
-        industry,
-      };
-    })
-    // Filter by industry (always keep user's company)
+        estimatedSize: co.estimated_size || estimateCompanySize(co.name, members),
+        isUserCompany: true,
+        industry: co.industry || inferIndustry(co.name, members),
+      });
+    }
+  }
+
+  // Filter by industry (always keep user's company)
+  const companyNodes = filteredCompanyNodes
     .filter(c => c.isUserCompany || industryFilter === "all" || c.industry === industryFilter)
-    // Sort so user's company comes first
     .sort((a, b) => (b.isUserCompany ? 1 : 0) - (a.isUserCompany ? 1 : 0));
 
   // Create contact nodes (only for companies that passed all filters)
-  const includedCompanies = new Set(companyNodes.map(c => c.name));
+  const includedCompanyIds = new Set(companyNodes.map(c => c.numericId));
   const companySizeMap = {};
-  companyNodes.forEach(c => { companySizeMap[c.name] = c.estimatedSize; });
+  companyNodes.forEach(c => { companySizeMap[c.numericId] = c.estimatedSize; });
 
-  // Count company relationships per company name
+  // Count company relationships per company ID
   const companyLinkCounts = {};
   (companyRelationships || []).forEach(rel => {
-    // source/target are like "company_ACME" — extract the name
-    const src = (rel.source || '').replace(/^company_/, '');
-    const tgt = (rel.target || '').replace(/^company_/, '');
-    companyLinkCounts[src] = (companyLinkCounts[src] || 0) + 1;
-    companyLinkCounts[tgt] = (companyLinkCounts[tgt] || 0) + 1;
+    const srcId = parseInt((rel.source || '').replace('company_', ''), 10);
+    const tgtId = parseInt((rel.target || '').replace('company_', ''), 10);
+    if (srcId) companyLinkCounts[srcId] = (companyLinkCounts[srcId] || 0) + 1;
+    if (tgtId) companyLinkCounts[tgtId] = (companyLinkCounts[tgtId] || 0) + 1;
   });
 
-  const normalizeCompany = (name) => {
-    const trimmed = name?.trim();
-    return (!trimmed || trimmed === "Unknown") ? "Unbekannt" : trimmed;
-  };
-
   const contactNodes = contacts
-    .filter(c => includedCompanies.has(normalizeCompany(c.company)))
+    .filter(c => {
+      const cid = c.companyId || 0;
+      return includedCompanyIds.has(cid);
+    })
     .map(c => {
-      const co = normalizeCompany(c.company);
+      const cid = c.companyId || 0;
       const seniority = calculateSeniority(c.position);
-      const companyMembers = filteredCompanyMap[co]?.length || 1;
-      const estimatedSize = companySizeMap[co] || 100;
-      const companyLinkCount = companyLinkCounts[co] || 0;
+      const companyMembers = (companyMembersMap[cid] || []).length || 1;
+      const estimatedSize = companySizeMap[cid] || 100;
+      const companyLinkCount = companyLinkCounts[cid] || 0;
       const influenceScore = calculateInfluence(c, seniority, companyMembers, estimatedSize, companyLinkCount);
       const isUser = typeof c.id === 'string' && c.id.startsWith('user_');
 
       return {
         ...c,
-        company: co,
         type: "contact",
-        companyId: `company_${co}`,
+        companyNodeId: `company_${cid}`,
         seniority,
         influenceScore,
         isUser,
@@ -224,16 +253,16 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
   const links = contactNodes
     .map(c => ({
       source: c.id,
-      target: c.companyId,
+      target: c.companyNodeId,
       type: "employment"
     }));
 
   // Sort companies by estimated size
   companyNodes.sort((a, b) => (b.estimatedSize || 0) - (a.estimatedSize || 0));
 
-  // Collect all unique industries (from ALL companies before industry filter, so dropdown stays stable)
+  // Collect all unique industries
   const allIndustries = [...new Set(
-    Object.entries(filteredCompanyMap).map(([name, members]) => inferIndustry(name, members))
+    companyNodes.map(c => c.industry)
   )].sort();
 
   return {
@@ -241,7 +270,7 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     contactNodes,
     companyNodes,
     links,
-    companyMap: filteredCompanyMap,
+    companyMap: Object.fromEntries(companyNodes.map(c => [c.name, c.members])),
     totalContacts: contacts.length,
     filteredContacts: contactNodes.length,
     allIndustries,
@@ -252,7 +281,7 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
  * Infer company-to-company connections based on shared contacts
  */
 export function inferCompanyConnections(contacts, companyNodes, minSharedContacts = 2) {
-  // Group contacts by company
+  // Group contacts by company node ID
   const companyContacts = {};
   contacts.forEach(c => {
     const co = c.company?.trim();
@@ -295,14 +324,19 @@ export function inferCompanyConnections(contacts, companyNodes, minSharedContact
       if (contactsA.length >= minSharedContacts &&
           contactsB.length >= minSharedContacts &&
           strength >= 3) {
-        connections.push({
-          source: `company_${companyA}`,
-          target: `company_${companyB}`,
-          type: "inferred",
-          strength: Math.min(strength / 10, 1),
-          contactsA: contactsA.length,
-          contactsB: contactsB.length,
-        });
+        // Find numeric company IDs for D3 node matching
+        const nodeA = companyNodes.find(n => n.name === companyA);
+        const nodeB = companyNodes.find(n => n.name === companyB);
+        if (nodeA && nodeB) {
+          connections.push({
+            source: nodeA.id,
+            target: nodeB.id,
+            type: "inferred",
+            strength: Math.min(strength / 10, 1),
+            contactsA: contactsA.length,
+            contactsB: contactsB.length,
+          });
+        }
       }
     }
   }

@@ -990,14 +990,14 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
     const cN = contactGroup.selectAll("circle").data(nodes.filter(n => n.type === "contact" && !n.isUser)).join("circle")
       .attr("r", contactRadius)
-      .attr("fill", d => (companyColors[`company_${d.company}`] || P.textMuted) + "CC")
+      .attr("fill", d => (companyColors[d.companyNodeId] || P.textMuted) + "CC")
       .attr("stroke", d => d.seniority >= 8 ? P.gold + "BB" : "transparent")
       .attr("stroke-width", d => d.seniority >= 8 ? 1.5 : 0)
       .attr("cursor", "pointer").attr("opacity", 0.85)
       .on("mouseover", function(_, d) {
         // When a company is selected, ignore hover on contacts from other companies
         const sc = selectedCompanyRef.current;
-        if (sc && d.company !== sc.name) return;
+        if (sc && d.companyNodeId !== sc.id) return;
         d3.select(this)
           .attr("r", contactRadius(d) * 1.8)
           .attr("opacity", 1);
@@ -1010,7 +1010,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       })
       .on("mouseout", function(_, d) {
         const sc = selectedCompanyRef.current;
-        if (sc && d.company !== sc.name) return;
+        if (sc && d.companyNodeId !== sc.id) return;
         d3.select(this)
           .attr("r", contactRadius(d))
           .attr("opacity", sc ? 1 : 0.85);
@@ -1259,16 +1259,8 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       if (tId === selectedId) connectedIds.add(sId);
     });
 
-    // Build set of connected company names for contact filtering
-    const connectedNames = new Set();
-    connectedNames.add(companyName);
-    if (nodesRef.current) {
-      nodesRef.current.forEach(n => {
-        if (n.type === "company" && connectedIds.has(n.id)) {
-          connectedNames.add(n.name);
-        }
-      });
-    }
+    // connectedIds already contains all connected company node IDs (company_${numericId})
+    // Contacts use companyNodeId to match
 
     // Dim companies that aren't connected; keep user's company visible
     if (cG) {
@@ -1327,20 +1319,19 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         const tId = typeof d.target === "object" ? d.target.id : d.target;
         const sNode = nodesRef.current.find(n => n.id === sId);
         const tNode = nodesRef.current.find(n => n.id === tId);
-        const sComp = sNode?.company || "";
-        const tComp = tNode?.company || "";
-        return (connectedNames.has(sComp) || connectedIds.has(sId)) &&
-               (connectedNames.has(tComp) || connectedIds.has(tId)) ? null : "none";
+        const sConnected = connectedIds.has(sId) || (sNode?.companyNodeId && connectedIds.has(sNode.companyNodeId));
+        const tConnected = connectedIds.has(tId) || (tNode?.companyNodeId && connectedIds.has(tNode.companyNodeId));
+        return sConnected && tConnected ? null : "none";
       });
     }
 
     // Hide contacts of unconnected companies for performance; show connected ones
-    cN.attr("display", d => connectedNames.has(d.company) ? null : "none")
-      .attr("opacity", d => connectedNames.has(d.company) ? 1 : 0.08);
+    cN.attr("display", d => connectedIds.has(d.companyNodeId) ? null : "none")
+      .attr("opacity", d => connectedIds.has(d.companyNodeId) ? 1 : 0.08);
 
     // Find big players: top contacts by seniority/influence in the selected company
     const companyContacts = nodesRef.current.filter(
-      n => n.type === "contact" && !n.isUser && n.company === companyName
+      n => n.type === "contact" && !n.isUser && n.companyNodeId === selectedId
     );
     const bigPlayers = [...companyContacts]
       .sort((a, b) => (b.seniority || 0) - (a.seniority || 0) || (b.influenceScore || 0) - (a.influenceScore || 0))
@@ -1352,7 +1343,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     const ringsGroup = g.append("g").attr("class", "big-player-ring");
 
     bigPlayers.forEach(p => {
-      const color = companyColors[`company_${companyName}`] || P.accent;
+      const color = companyColors[selectedId] || P.accent;
       const r = 3 + (p.normalizedInfluence || 0) * 8;
 
       // Pulsing ring
@@ -1397,7 +1388,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       const selGroup = cG.filter(d => d.id === selectedId);
       if (!selGroup.empty()) {
         const selData = selGroup.datum();
-        const selColor = companyColors[`company_${companyName}`] || P.accent;
+        const selColor = companyColors[selectedId] || P.accent;
         const radiusFn = getCompanyRadiusRef.current;
         const selR = selData && radiusFn ? radiusFn(selData) : 20;
 
@@ -1559,8 +1550,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       cG.filter(d => d.isUserCompany).attr("opacity", 0);
 
       // Hide user company's contacts and connections
-      const userCompanyName = userNode.id.replace("company_", "");
-      if (cN) cN.filter(d => d.company === userCompanyName)
+      if (cN) cN.filter(d => d.companyNodeId === userNode.id)
         .transition().duration(300).attr("r", 0).attr("opacity", 0);
       if (link) link.filter(d => {
         const sId = typeof d.source === "object" ? d.source.id : d.source;
@@ -2023,8 +2013,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
               .attr("opacity", 0)
               .on("end", function() { d3.select(this).style("display", "none"); });
 
-            const companyName = other.id.replace("company_", "");
-            if (cN) cN.filter(d => d.company === companyName)
+            if (cN) cN.filter(d => d.companyNodeId === other.id)
               .transition().duration(300).attr("r", 0).attr("opacity", 0);
 
             if (link) link.filter(d => {

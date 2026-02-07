@@ -11,7 +11,7 @@ export function useUser() {
     if (!isInitialized) return;
     setIsLoading(true);
     try {
-      const users = query('SELECT * FROM users LIMIT 1');
+      const users = query('SELECT * FROM profile LIMIT 1');
       setUser(users[0] || null);
     } catch (err) {
       console.error('Failed to load user:', err);
@@ -31,10 +31,10 @@ export function useUser() {
   const createUser = useCallback(async (userData) => {
     const { name, email, role } = userData;
     await execute(
-      'INSERT INTO users (name, email, role) VALUES (?, ?, ?)',
+      'INSERT INTO profile (name, email, role) VALUES (?, ?, ?)',
       [name, email || null, role || null]
     );
-    const id = lastInsertRowId('users');
+    const id = lastInsertRowId('profile');
     const newUser = { id, name, email, role };
     setUser(newUser);
     return newUser;
@@ -44,7 +44,7 @@ export function useUser() {
     if (!user) return null;
     const { name, email, role } = userData;
     await execute(
-      'UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?',
+      'UPDATE profile SET name = ?, email = ?, role = ? WHERE id = ?',
       [name, email || null, role || null, user.id]
     );
     const updatedUser = { ...user, name, email, role };
@@ -54,7 +54,7 @@ export function useUser() {
 
   const deleteUser = useCallback(async () => {
     if (!user) return;
-    await execute('DELETE FROM users WHERE id = ?', [user.id]);
+    await execute('DELETE FROM profile WHERE id = ?', [user.id]);
     setUser(null);
   }, [user]);
 

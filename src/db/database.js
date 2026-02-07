@@ -47,6 +47,19 @@ async function saveToIndexedDB(data) {
   });
 }
 
+// Save a backup to IndexedDB under a separate key
+async function backupToIndexedDB(data) {
+  const idb = await openIndexedDB();
+  return new Promise((resolve, reject) => {
+    const transaction = idb.transaction(INDEXEDDB_STORE, 'readwrite');
+    const store = transaction.objectStore(INDEXEDDB_STORE);
+    const request = store.put(data, 'database_backup_v1');
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
 // Load sql.js from CDN
 async function loadSqlJs() {
   return new Promise((resolve, reject) => {
@@ -61,6 +74,324 @@ async function loadSqlJs() {
     script.onerror = reject;
     document.head.appendChild(script);
   });
+}
+
+// Detect whether old schema (v1) exists
+function isOldSchema(database) {
+  try {
+    const tables = database.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    if (tables.length === 0) return false;
+    const names = tables[0].values.map(r => r[0]);
+    return names.includes('users') && !names.includes('profile');
+  } catch {
+    return false;
+  }
+}
+
+// Migrate from v1 (users/contacts.company TEXT/company_relationships) to v2 (profile/companies FK/relations)
+async function migrateV1toV2(database) {
+  console.log('[DB Migration] Starting v1 → v2 migration...');
+
+  // 1. Backup raw bytes
+  const backupBytes = new Uint8Array(database.export());
+  await backupToIndexedDB(backupBytes);
+  console.log('[DB Migration] Backup saved to IndexedDB key "database_backup_v1"');
+
+  // 2. BEGIN TRANSACTION
+  database.run('BEGIN TRANSACTION');
+
+  try {
+    // 3. Rename old tables
+    database.run('ALTER TABLE users RENAME TO _old_users');
+
+    // Check which old tables exist
+    const tableRows = database.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    const existingTables = tableRows.length > 0 ? tableRows[0].values.map(r => r[0]) : [];
+
+    const hasOldCompanies = existingTables.includes('companies');
+    const hasOldContacts = existingTables.includes('contacts');
+    const hasOldRels = existingTables.includes('company_relationships');
+
+    if (hasOldCompanies) database.run('ALTER TABLE companies RENAME TO _old_companies');
+    if (hasOldContacts) database.run('ALTER TABLE contacts RENAME TO _old_contacts');
+    if (hasOldRels) database.run('ALTER TABLE company_relationships RENAME TO _old_rels');
+
+    // 4. Create new tables
+    database.run(`
+      CREATE TABLE profile (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT,
+        role TEXT,
+        password_hash TEXT,
+        password_salt TEXT,
+        company_id INTEGER REFERENCES companies(id),
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES profile(id),
+        name TEXT NOT NULL,
+        estimated_size INTEGER,
+        industry TEXT,
+        color TEXT,
+        description TEXT,
+        website TEXT,
+        headquarters TEXT,
+        founded_year INTEGER,
+        company_type TEXT,
+        linkedin_url TEXT,
+        enriched_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES profile(id),
+        external_id TEXT UNIQUE,
+        name TEXT NOT NULL,
+        company_id INTEGER REFERENCES companies(id),
+        position TEXT,
+        connected_on TEXT,
+        linkedin_url TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES profile(id),
+        source_company_id INTEGER NOT NULL REFERENCES companies(id),
+        target_company_id INTEGER NOT NULL REFERENCES companies(id),
+        type TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    // 5. Migrate _old_users -> profile
+    // Check if old users table has password columns
+    let hasPasswordCols = false;
+    try {
+      database.exec('SELECT password_hash FROM _old_users LIMIT 0');
+      hasPasswordCols = true;
+    } catch { /* no password columns */ }
+
+    if (hasPasswordCols) {
+      database.run(`
+        INSERT INTO profile (id, name, email, role, password_hash, password_salt, created_at)
+        SELECT id, name, email, role, password_hash, password_salt, created_at FROM _old_users
+      `);
+    } else {
+      database.run(`
+        INSERT INTO profile (id, name, email, role, created_at)
+        SELECT id, name, email, role, created_at FROM _old_users
+      `);
+    }
+
+    // Get user id
+    const userRows = database.exec('SELECT id FROM profile LIMIT 1');
+    const userId = userRows.length > 0 ? userRows[0].values[0][0] : 1;
+
+    // 6. Collect ALL unique company names (case-insensitive, first-seen casing)
+    const companyNameMap = {}; // lowercase -> { canonical, enrichment }
+
+    // From old contacts
+    if (hasOldContacts) {
+      const contactCompanies = database.exec('SELECT DISTINCT company FROM _old_contacts WHERE company IS NOT NULL AND company != \'\'');
+      if (contactCompanies.length > 0) {
+        contactCompanies[0].values.forEach(([name]) => {
+          const key = name.toLowerCase().trim();
+          if (key && !companyNameMap[key]) {
+            companyNameMap[key] = { canonical: name.trim(), enrichment: null };
+          }
+        });
+      }
+    }
+
+    // From old relationships
+    if (hasOldRels) {
+      // Strip any remaining "company_" prefix from old rels
+      const relCompanies = database.exec(`
+        SELECT DISTINCT source_company FROM _old_rels WHERE source_company IS NOT NULL
+        UNION
+        SELECT DISTINCT target_company FROM _old_rels WHERE target_company IS NOT NULL
+      `);
+      if (relCompanies.length > 0) {
+        relCompanies[0].values.forEach(([name]) => {
+          let clean = name;
+          if (clean.startsWith('company_')) clean = clean.slice(8);
+          const key = clean.toLowerCase().trim();
+          if (key && !companyNameMap[key]) {
+            companyNameMap[key] = { canonical: clean.trim(), enrichment: null };
+          }
+        });
+      }
+    }
+
+    // From old companies (enrichment data)
+    if (hasOldCompanies) {
+      const oldCos = database.exec('SELECT * FROM _old_companies');
+      if (oldCos.length > 0) {
+        const cols = oldCos[0].columns;
+        oldCos[0].values.forEach(row => {
+          const obj = {};
+          cols.forEach((c, i) => { obj[c] = row[i]; });
+          const key = (obj.name || '').toLowerCase().trim();
+          if (key) {
+            if (!companyNameMap[key]) {
+              companyNameMap[key] = { canonical: obj.name.trim(), enrichment: obj };
+            } else {
+              companyNameMap[key].enrichment = obj;
+            }
+          }
+        });
+      }
+    }
+
+    // 7. Create company rows
+    // Collect custom_estimated_size from old contacts as fallback
+    const contactSizeMap = {}; // lowercase company -> size
+    if (hasOldContacts) {
+      const sizeRows = database.exec(`
+        SELECT company, custom_estimated_size FROM _old_contacts
+        WHERE custom_estimated_size IS NOT NULL AND custom_estimated_size > 0
+      `);
+      if (sizeRows.length > 0) {
+        sizeRows[0].values.forEach(([co, size]) => {
+          if (co) contactSizeMap[co.toLowerCase().trim()] = size;
+        });
+      }
+    }
+
+    const companyIdMap = {}; // lowercase -> numeric id
+    for (const [key, { canonical, enrichment }] of Object.entries(companyNameMap)) {
+      const e = enrichment || {};
+      const estimatedSize = e.estimated_size || contactSizeMap[key] || null;
+      database.run(
+        `INSERT INTO companies (user_id, name, estimated_size, industry, color, description, website, headquarters, founded_year, company_type, linkedin_url, enriched_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          canonical,
+          estimatedSize,
+          e.industry || null,
+          e.color || null,
+          e.description || null,
+          e.website || null,
+          e.headquarters || null,
+          e.founded_year || null,
+          e.company_type || null,
+          e.linkedin_url || null,
+          e.enriched_at || null,
+        ]
+      );
+      // Get the id (MAX fallback because last_insert_rowid is broken in CDN sql.js)
+      const idRow = database.exec(`SELECT MAX(id) as id FROM companies`);
+      companyIdMap[key] = idRow[0].values[0][0];
+    }
+
+    // 8. Set profile.company_id to user's own company
+    if (hasOldCompanies) {
+      const firstCo = database.exec('SELECT name FROM _old_companies ORDER BY id ASC LIMIT 1');
+      if (firstCo.length > 0) {
+        const firstCoName = firstCo[0].values[0][0];
+        const coId = companyIdMap[firstCoName.toLowerCase().trim()];
+        if (coId) {
+          database.run('UPDATE profile SET company_id = ? WHERE id = ?', [coId, userId]);
+        }
+      }
+    }
+
+    // 9. Migrate contacts (skip is_company_placeholder=1)
+    if (hasOldContacts) {
+      // Check if old contacts have linkedin_url column
+      let hasLinkedinUrl = false;
+      try {
+        database.exec('SELECT linkedin_url FROM _old_contacts LIMIT 0');
+        hasLinkedinUrl = true;
+      } catch { /* no linkedin_url */ }
+
+      const oldContacts = database.exec(`
+        SELECT * FROM _old_contacts
+        WHERE is_company_placeholder = 0 OR is_company_placeholder IS NULL
+      `);
+
+      if (oldContacts.length > 0) {
+        const cols = oldContacts[0].columns;
+        oldContacts[0].values.forEach(row => {
+          const obj = {};
+          cols.forEach((c, i) => { obj[c] = row[i]; });
+          const coKey = (obj.company || '').toLowerCase().trim();
+          const companyId = coKey ? (companyIdMap[coKey] || null) : null;
+          database.run(
+            `INSERT INTO contacts (user_id, external_id, name, company_id, position, connected_on, linkedin_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              userId,
+              obj.external_id || null,
+              obj.name,
+              companyId,
+              obj.position || null,
+              obj.connected_on || null,
+              hasLinkedinUrl ? (obj.linkedin_url || null) : null,
+            ]
+          );
+        });
+      }
+    }
+
+    // 10. Migrate relationships
+    if (hasOldRels) {
+      const oldRels = database.exec('SELECT * FROM _old_rels');
+      if (oldRels.length > 0) {
+        const cols = oldRels[0].columns;
+        oldRels[0].values.forEach(row => {
+          const obj = {};
+          cols.forEach((c, i) => { obj[c] = row[i]; });
+
+          let src = obj.source_company || '';
+          let tgt = obj.target_company || '';
+          if (src.startsWith('company_')) src = src.slice(8);
+          if (tgt.startsWith('company_')) tgt = tgt.slice(8);
+
+          const srcId = companyIdMap[src.toLowerCase().trim()];
+          const tgtId = companyIdMap[tgt.toLowerCase().trim()];
+          if (srcId && tgtId) {
+            database.run(
+              `INSERT INTO relations (user_id, source_company_id, target_company_id, type, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [userId, srcId, tgtId, obj.relationship_type || 'customer', obj.created_at || null]
+            );
+          }
+        });
+      }
+    }
+
+    // 11. Drop old tables, create indexes
+    database.run('DROP TABLE IF EXISTS _old_users');
+    database.run('DROP TABLE IF EXISTS _old_companies');
+    database.run('DROP TABLE IF EXISTS _old_contacts');
+    database.run('DROP TABLE IF EXISTS _old_rels');
+
+    database.run('CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id)');
+    database.run('CREATE INDEX IF NOT EXISTS idx_contacts_company_id ON contacts(company_id)');
+    database.run('CREATE INDEX IF NOT EXISTS idx_companies_user_id ON companies(user_id)');
+    database.run('CREATE INDEX IF NOT EXISTS idx_relations_user_id ON relations(user_id)');
+
+    // 12. COMMIT
+    database.run('COMMIT');
+    console.log('[DB Migration] v1 → v2 migration complete');
+  } catch (err) {
+    console.error('[DB Migration] ROLLBACK due to error:', err);
+    database.run('ROLLBACK');
+    throw err;
+  }
 }
 
 // Initialize the database
@@ -80,85 +411,15 @@ export async function initDatabase() {
 
   if (savedData) {
     db = new SQL.Database(savedData);
-    // Repair: fix user_id=0 from broken lastInsertRowId in older sessions
-    try {
-      const users = db.exec('SELECT id FROM users LIMIT 1');
-      if (users.length > 0) {
-        const realUserId = users[0].values[0][0];
-        const companies = db.exec('SELECT user_id FROM companies LIMIT 1');
-        if (companies.length > 0 && companies[0].values[0][0] === 0 && realUserId !== 0) {
-          db.run('UPDATE companies SET user_id = ' + realUserId + ' WHERE user_id = 0');
-          db.run('UPDATE contacts SET user_id = ' + realUserId + ' WHERE user_id = 0');
-          await persistDatabase();
-        }
-      }
-    } catch (e) {
-      console.warn('[DB Repair] Skipped:', e.message);
-    }
-    // Migration: add password columns to users if missing
-    try {
-      db.exec('SELECT password_hash FROM users LIMIT 0');
-    } catch (e) {
-      db.run('ALTER TABLE users ADD COLUMN password_hash TEXT');
-      db.run('ALTER TABLE users ADD COLUMN password_salt TEXT');
+
+    // Check if migration is needed
+    if (isOldSchema(db)) {
+      await migrateV1toV2(db);
       await persistDatabase();
-    }
-    // Migration: add linkedin_url column if missing
-    try {
-      db.exec('SELECT linkedin_url FROM contacts LIMIT 0');
-    } catch (e) {
-      db.run('ALTER TABLE contacts ADD COLUMN linkedin_url TEXT');
-      await persistDatabase();
-    }
-    // Migration: add color column to companies if missing
-    try {
-      db.exec('SELECT color FROM companies LIMIT 0');
-    } catch (e) {
-      db.run('ALTER TABLE companies ADD COLUMN color TEXT');
-      await persistDatabase();
-    }
-    // Migration: add enrichment columns to companies if missing
-    try {
-      db.exec('SELECT description FROM companies LIMIT 0');
-    } catch (e) {
-      db.run('ALTER TABLE companies ADD COLUMN description TEXT');
-      db.run('ALTER TABLE companies ADD COLUMN website TEXT');
-      db.run('ALTER TABLE companies ADD COLUMN headquarters TEXT');
-      db.run('ALTER TABLE companies ADD COLUMN founded_year INTEGER');
-      db.run('ALTER TABLE companies ADD COLUMN company_type TEXT');
-      db.run('ALTER TABLE companies ADD COLUMN linkedin_url TEXT');
-      db.run('ALTER TABLE companies ADD COLUMN enriched_at TEXT');
-      await persistDatabase();
-    }
-    // Migration: add created_at column to company_relationships if missing
-    try {
-      db.exec('SELECT created_at FROM company_relationships LIMIT 0');
-    } catch (e) {
-      db.run('ALTER TABLE company_relationships ADD COLUMN created_at TEXT');
-      await persistDatabase();
-    }
-    // Migration: strip "company_" prefix from source_company / target_company
-    try {
-      db.run("UPDATE company_relationships SET source_company = SUBSTR(source_company, 9) WHERE source_company LIKE 'company_%'");
-      db.run("UPDATE company_relationships SET target_company = SUBSTR(target_company, 9) WHERE target_company LIKE 'company_%'");
-      await persistDatabase();
-    } catch (e) {
-      console.warn('[DB Migration] Strip company_ prefix skipped:', e.message);
-    }
-    // Migration: convert supplier relationships to customer with swapped direction
-    try {
-      db.run(`UPDATE company_relationships
-        SET source_company = target_company,
-            target_company = source_company,
-            relationship_type = 'customer'
-        WHERE relationship_type = 'supplier'`);
-      await persistDatabase();
-    } catch (e) {
-      console.warn('[DB Migration] Supplier→customer conversion skipped:', e.message);
     }
   } else {
     db = new SQL.Database();
-    // Create tables
+    // Create tables (fresh install)
     db.run(SCHEMA_SQL);
     await persistDatabase();
   }
@@ -241,21 +502,96 @@ export function lastInsertRowId(table = null) {
 // Clear all data (for testing/reset)
 export async function clearDatabase() {
   const database = getDatabase();
-  database.run('DELETE FROM company_relationships');
+  database.run('DELETE FROM relations');
   database.run('DELETE FROM contacts');
   database.run('DELETE FROM companies');
-  database.run('DELETE FROM users');
+  database.run('DELETE FROM profile');
   await persistDatabase();
 }
 
 // Check if database has any users (for onboarding check)
-export function hasUser() {
-  const result = query('SELECT COUNT(*) as count FROM users');
+export function hasProfile() {
+  const result = query('SELECT COUNT(*) as count FROM profile');
   return result[0]?.count > 0;
 }
 
 // Get the first user record (for login)
-export function getUser() {
-  const result = query('SELECT * FROM users LIMIT 1');
+export function getProfile() {
+  const result = query('SELECT * FROM profile LIMIT 1');
   return result[0] || null;
+}
+
+// Backward-compat aliases
+export const hasUser = hasProfile;
+export const getUser = getProfile;
+
+// Export the database as a downloadable .db file
+export function exportDatabase() {
+  const database = getDatabase();
+  const data = database.export();
+  const blob = new Blob([data], { type: 'application/x-sqlite3' });
+  const date = new Date().toISOString().slice(0, 10);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `netzwerk-backup-${date}.db`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Import a .db file, validate it, replace the current database, and persist
+export async function importDatabase(file) {
+  try {
+    const buffer = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+
+    // Validate SQLite magic bytes
+    const header = new Uint8Array(buffer, 0, 16);
+    const magic = String.fromCharCode(...header);
+    if (magic !== 'SQLite format 3\0') {
+      return { success: false, message: 'Ungültige Datei — kein SQLite-Backup.' };
+    }
+
+    // Backup current DB before overwriting
+    if (db) {
+      const backupData = new Uint8Array(db.export());
+      await backupToIndexedDB(backupData);
+    }
+
+    // Replace in-memory database
+    const newDb = new SQL.Database(new Uint8Array(buffer));
+
+    // Auto-migrate if old schema
+    if (isOldSchema(newDb)) {
+      await migrateV1toV2(newDb);
+    }
+
+    db = newDb;
+    await persistDatabase();
+    return { success: true, message: 'Backup erfolgreich wiederhergestellt.' };
+  } catch (err) {
+    console.error('[Import] Failed:', err);
+    return { success: false, message: `Import fehlgeschlagen: ${err.message}` };
+  }
+}
+
+// Get or create a company by name (case-insensitive)
+// Returns the company_id
+export async function getOrCreateCompany(userId, name) {
+  if (!name || !name.trim()) return null;
+  const trimmed = name.trim();
+  const existing = query(
+    'SELECT id FROM companies WHERE user_id = ? AND LOWER(name) = LOWER(?)',
+    [userId, trimmed]
+  );
+  if (existing.length > 0) return existing[0].id;
+
+  await execute(
+    'INSERT INTO companies (user_id, name) VALUES (?, ?)',
+    [userId, trimmed]
+  );
+  return lastInsertRowId('companies');
 }

@@ -6,6 +6,7 @@ import { P, CC } from "./styles/theme";
 
 // Utils
 import { buildNetwork, inferCompanyConnections, calculateSeniority } from "./utils/networkBuilder";
+import { exportDatabase, importDatabase } from "./db/database";
 
 // Database & Hooks
 import { useDatabase } from "./contexts/DatabaseContext";
@@ -130,7 +131,7 @@ export default function App() {
 
   // User & Company hooks
   const { user, isLoading: userLoading, deleteUser } = useUser();
-  const { company, updateCompany, deleteCompany, getCompanyEnrichment, getAllCompanyEnrichments, saveCompanyEnrichment, deleteCompanyEnrichment } = useCompany(user?.id);
+  const { companies, company, createCompany, updateCompany, deleteCompany, getCompanyByName, getOrCreateCompanyId, reloadCompanies } = useCompany(user?.id);
 
   // Contacts hook with userId
   const {
@@ -194,43 +195,38 @@ export default function App() {
   // Filter contacts by seniority (always keep user's own contact + user's company contacts)
   const filteredContacts = useMemo(() => {
     if (seniorityFilter === 0) return contacts;
-    const userCompanyName = company?.name?.toLowerCase();
+    const userCompanyId = company?.id;
     return contacts.filter(c => {
       // Always keep user's own contact
       if (typeof c.id === 'string' && c.id.startsWith('user_')) return true;
       // Always keep contacts at user's company
-      if (userCompanyName && c.company?.trim().toLowerCase() === userCompanyName) return true;
+      if (userCompanyId && c.companyId === userCompanyId) return true;
       const seniority = calculateSeniority(c.position);
       return seniority >= seniorityFilter;
     });
-  }, [contacts, seniorityFilter, company?.name]);
+  }, [contacts, seniorityFilter, company?.id]);
 
-  // Get all enrichment data for companies
-  const companyEnrichments = useMemo(() => getAllCompanyEnrichments(), [getAllCompanyEnrichments, contacts]);
-
-  // Compute set of company names connected to user's company (for Direkt filter)
-  // When a specific link type is selected, only shows companies connected via that type
-  const focusCompanyNames = useMemo(() => {
-    if (!focusConnections || !company?.name) return null;
-    const userCompanyId = `company_${company.name}`;
-    const names = new Set();
+  // Compute set of numeric company IDs connected to user's company (for Direkt filter)
+  const focusCompanyIds = useMemo(() => {
+    if (!focusConnections || !company?.id) return null;
+    const userNodeId = `company_${company.id}`;
+    const ids = new Set();
     companyRelationships.forEach(rel => {
-      // When a specific link type is selected, only include that type
       if (companyLinkFilter !== "all" && companyLinkFilter !== "none" && rel.type !== companyLinkFilter) return;
-      if (rel.source === userCompanyId) {
-        names.add(rel.target.replace(/^company_/, '').trim().toLowerCase());
+      if (rel.source === userNodeId) {
+        ids.add(rel.targetCompanyId);
       }
-      if (rel.target === userCompanyId) {
-        names.add(rel.source.replace(/^company_/, '').trim().toLowerCase());
+      if (rel.target === userNodeId) {
+        ids.add(rel.sourceCompanyId);
       }
     });
-    return names.size > 0 ? names : null;
-  }, [focusConnections, company?.name, companyRelationships, companyLinkFilter]);
+    return ids.size > 0 ? ids : null;
+  }, [focusConnections, company?.id, companyRelationships, companyLinkFilter]);
 
-  // Build network (pass user's company to always show it centered)
+  // Build network (pass companies array and user's company ID)
   const network = useMemo(() =>
-    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments, focusCompanyNames),
-    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments, focusCompanyNames]
+    buildNetwork(filteredContacts, companies, minCompanySize, company?.id, industryFilter, companyRelationships, focusCompanyIds),
+    [filteredContacts, companies, minCompanySize, company?.id, industryFilter, companyRelationships, focusCompanyIds]
   );
 
   // Top influencers
@@ -278,11 +274,11 @@ export default function App() {
     const m = {};
     network.companyNodes.forEach(c => { m[c.id] = CC[hash(c.name) % CC.length]; });
     // Override user's company with custom color if set
-    if (company?.color && company?.name) {
-      m[`company_${company.name}`] = company.color;
+    if (company?.color && company?.id) {
+      m[`company_${company.id}`] = company.color;
     }
     return m;
-  }, [network, company?.color, company?.name]);
+  }, [network, company?.color, company?.id]);
 
   // Search results (contacts + companies)
   const searchResults = useMemo(() => {
@@ -664,14 +660,15 @@ export default function App() {
               userCompany={company}
               updateCompany={updateCompany}
               renameCompany={dbRenameCompany}
+              deleteCompany={deleteCompany}
               deleteCompanyContacts={dbDeleteCompanyContacts}
               onEditContact={setEditingContact}
               onDeleteContact={deleteContact}
               onFocusNode={(id) => setFocusNode({ id, ts: Date.now() })}
               contacts={contacts}
-              getCompanyEnrichment={getCompanyEnrichment}
-              saveCompanyEnrichment={saveCompanyEnrichment}
-              deleteCompanyEnrichment={deleteCompanyEnrichment}
+              companies={companies}
+              getCompanyByName={getCompanyByName}
+              reloadCompanies={reloadCompanies}
             />
           </div>
       </div>
@@ -696,7 +693,9 @@ export default function App() {
 
       {showAddCompanyModal && (
         <AddCompanyModal
-          onAdd={addContact}
+          onAdd={async (companyData) => {
+            await createCompany(companyData);
+          }}
           onClose={() => setShowAddCompanyModal(false)}
         />
       )}
@@ -707,6 +706,8 @@ export default function App() {
           company={company}
           onDeleteAccount={handleDeleteAccount}
           onLogout={logout}
+          onExportDatabase={exportDatabase}
+          onImportDatabase={importDatabase}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -714,14 +715,16 @@ export default function App() {
       {showAIChat && (
         <AIChatAssistant
           onAddContact={addContact}
-          onAddCompany={addContact}
+          onCreateCompany={createCompany}
           onAddRelationship={addRelationship}
           onUpdateContact={updateContact}
           existingContacts={contacts}
           existingCompanies={existingCompanies}
+          companies={companies}
           onClose={() => setShowAIChat(false)}
-          getCompanyEnrichment={getCompanyEnrichment}
-          saveCompanyEnrichment={saveCompanyEnrichment}
+          getCompanyByName={getCompanyByName}
+          getOrCreateCompanyId={getOrCreateCompanyId}
+          updateCompany={updateCompany}
           companyRelationships={companyRelationships}
           userCompany={company}
         />
