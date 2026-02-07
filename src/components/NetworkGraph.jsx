@@ -48,6 +48,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
   const contactLinkGroupRef = useRef(null);
   const minimapRef = useRef(null);
   const minimapInfoRef = useRef(null);
+  const getCompanyRadiusRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     zoomToFit: () => {
@@ -117,7 +118,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
 
     // Sun glow for user's company — large soft corona
     const sunGlow = defs.append("filter").attr("id", "sun-glow")
-      .attr("x", "-200%").attr("y", "-200%").attr("width", "500%").attr("height", "500%");
+      .attr("x", "-400%").attr("y", "-400%").attr("width", "900%").attr("height", "900%");
     sunGlow.append("feGaussianBlur").attr("stdDeviation", "18").attr("result", "b1");
     sunGlow.append("feGaussianBlur").attr("in", "SourceGraphic").attr("stdDeviation", "6").attr("result", "b2");
     const sfm = sunGlow.append("feMerge");
@@ -140,12 +141,54 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     sunGrad.append("stop").attr("offset", "60%").attr("stop-color", ucColor).attr("stop-opacity", 0.07);
     sunGrad.append("stop").attr("offset", "100%").attr("stop-color", ucColor).attr("stop-opacity", 0);
 
+    // Planet shading gradient — 3D sphere illusion (light from upper-left)
+    const planetShade = defs.append("radialGradient").attr("id", "planet-shade")
+      .attr("cx", "30%").attr("cy", "30%").attr("r", "70%");
+    planetShade.append("stop").attr("offset", "0%").attr("stop-color", "#ffffff").attr("stop-opacity", 0.18);
+    planetShade.append("stop").attr("offset", "40%").attr("stop-color", "#ffffff").attr("stop-opacity", 0.04);
+    planetShade.append("stop").attr("offset", "100%").attr("stop-color", "#000000").attr("stop-opacity", 0.3);
+
+    // Black hole gradient — dark void center
+    const bhGrad = defs.append("radialGradient").attr("id", "bh-gradient");
+    bhGrad.append("stop").attr("offset", "0%").attr("stop-color", "#000000").attr("stop-opacity", 1);
+    bhGrad.append("stop").attr("offset", "50%").attr("stop-color", "#05000D").attr("stop-opacity", 0.95);
+    bhGrad.append("stop").attr("offset", "80%").attr("stop-color", "#1a0030").attr("stop-opacity", 0.5);
+    bhGrad.append("stop").attr("offset", "100%").attr("stop-color", "#7C3AED").attr("stop-opacity", 0);
+
+    // Black hole glow filter
+    const bhGlow = defs.append("filter").attr("id", "bh-glow")
+      .attr("x", "-150%").attr("y", "-150%").attr("width", "400%").attr("height", "400%");
+    bhGlow.append("feGaussianBlur").attr("stdDeviation", "6").attr("result", "b");
+    const bhm = bhGlow.append("feMerge");
+    bhm.append("feMergeNode").attr("in", "b");
+    bhm.append("feMergeNode").attr("in", "SourceGraphic");
+
+    // Accretion disk gradient
+    const diskGrad = defs.append("linearGradient").attr("id", "bh-disk-grad")
+      .attr("x1", "0%").attr("y1", "0%").attr("x2", "100%").attr("y2", "0%");
+    diskGrad.append("stop").attr("offset", "0%").attr("stop-color", "#7C3AED").attr("stop-opacity", 0);
+    diskGrad.append("stop").attr("offset", "25%").attr("stop-color", "#A855F7").attr("stop-opacity", 0.7);
+    diskGrad.append("stop").attr("offset", "50%").attr("stop-color", "#E9D5FF").attr("stop-opacity", 1);
+    diskGrad.append("stop").attr("offset", "75%").attr("stop-color", "#A855F7").attr("stop-opacity", 0.7);
+    diskGrad.append("stop").attr("offset", "100%").attr("stop-color", "#7C3AED").attr("stop-opacity", 0);
+
     // Corona classes (used for zoom-based opacity control, no CSS animation)
     // + animated dash offset for inferred connections
+    // + black hole accretion disk rotation
     svg.append("style").text(`
       .sun-corona, .sun-corona-outer { transition: opacity 0.3s ease; }
       @keyframes dash-flow { to { stroke-dashoffset: -20; } }
       .company-link-inferred { animation: dash-flow 1.2s linear infinite; }
+      @keyframes bh-spin { to { stroke-dashoffset: -40; } }
+      .bh-ring { animation: bh-spin 3s linear infinite; }
+      @keyframes sun-orbit { to { stroke-dashoffset: -50; } }
+      @keyframes sun-orbit-rev { to { stroke-dashoffset: 60; } }
+      @keyframes sun-pulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+      .sun-orbit-1 { animation: sun-orbit 6s linear infinite; }
+      .sun-orbit-2 { animation: sun-orbit-rev 10s linear infinite; }
+      .sun-pulse { animation: sun-pulse 4s ease-in-out infinite; }
+      .selected-orbit-1 { animation: sun-orbit 8s linear infinite; }
+      .selected-orbit-2 { animation: sun-orbit-rev 12s linear infinite; }
     `);
 
     // Arrow markers for company-to-company links
@@ -195,6 +238,13 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         const glowOpacity = Math.max(0.1, Math.min(1, (1.8 - currentZoomScale) / 1.2));
         g.selectAll(".sun-corona, .sun-corona-outer").style("opacity", glowOpacity);
         g.selectAll(".sun-glow-bubble").attr("filter", currentZoomScale < 2.5 ? "url(#sun-glow)" : "none");
+        // Expand sun corona/orbit radius when zoomed out so it fills more of the canvas
+        const coronaBoost = Math.max(1, 1 / Math.pow(currentZoomScale, 0.6));
+        g.selectAll(".sun-scalable").each(function() {
+          const el = d3.select(this);
+          const baseR = +el.attr("data-base-r");
+          if (baseR) el.attr("r", baseR * coronaBoost);
+        });
         // Scale arrow markers + stroke widths inversely with zoom for consistent screen size
         const scaleFactor = 1 / Math.sqrt(currentZoomScale);
         const markerSize = baseMarkerSize * scaleFactor;
@@ -296,15 +346,38 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
         if (n.x == null || n.type !== 'company') continue;
         const x = (n.x - x0) * sc + offX;
         const y = (n.y - y0) * sc + offY;
-        ctx.beginPath();
-        if (n.isUserCompany) {
+        if (n.name === 'Unbekannt') {
+          // Black hole glow
+          const grad = ctx.createRadialGradient(x, y, 0, x, y, 7);
+          grad.addColorStop(0, '#7C3AED60');
+          grad.addColorStop(0.5, '#7C3AED25');
+          grad.addColorStop(1, 'transparent');
+          ctx.beginPath();
+          ctx.arc(x, y, 7, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
+          // Dark core
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = '#0a0010';
+          ctx.fill();
+          // Purple ring
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.strokeStyle = '#A855F7';
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+        } else if (n.isUserCompany) {
+          ctx.beginPath();
           ctx.arc(x, y, 3.5, 0, Math.PI * 2);
           ctx.fillStyle = userCompanyColor || P.accent;
+          ctx.fill();
         } else {
+          ctx.beginPath();
           ctx.arc(x, y, 1.5, 0, Math.PI * 2);
           ctx.fillStyle = (companyColors[n.id] || P.accent) + '90';
+          ctx.fill();
         }
-        ctx.fill();
       }
 
       // Viewport rectangle
@@ -567,12 +640,17 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             .transition().duration(200)
             .attr("stroke-width", 3.5)
             .attr("fill", `${ucColor}40`);
+        } else if (d.name === "Unbekannt") {
+          group.select(".company-bubble")
+            .transition().duration(200)
+            .attr("stroke", "#7C3AED70")
+            .attr("fill", "#08000F");
         } else {
           group.select(".company-bubble")
             .transition().duration(200)
-            .attr("stroke-width", 2.5)
-            .attr("stroke", color + "90")
-            .attr("fill", color + "20");
+            .attr("stroke-width", 2)
+            .attr("stroke", color + "80")
+            .attr("fill", color + "40");
         }
       })
       .on("mouseout", function(_, d) {
@@ -583,12 +661,17 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
             .transition().duration(300)
             .attr("stroke-width", 2.5)
             .attr("fill", `${ucColor}30`);
+        } else if (d.name === "Unbekannt") {
+          group.select(".company-bubble")
+            .transition().duration(300)
+            .attr("stroke", "#7C3AED40")
+            .attr("fill", "#030006");
         } else {
           group.select(".company-bubble")
             .transition().duration(300)
             .attr("stroke-width", 1.5)
-            .attr("stroke", color + "40")
-            .attr("fill", color + "10");
+            .attr("stroke", color + "55")
+            .attr("fill", color + "30");
         }
       })
       .call(drag);
@@ -602,50 +685,125 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       const clamped = Math.max(0, Math.min(1, t));
       return minR + Math.pow(clamped, 0.6) * (maxR - minR);
     };
+    getCompanyRadiusRef.current = getCompanyRadius;
 
     // Outer corona for user's company (rendered behind everything in the group)
     cG.filter(d => d.isUserCompany).append("circle")
       .attr("r", d => getCompanyRadius(d) * 6)
+      .attr("data-base-r", d => getCompanyRadius(d) * 6)
       .attr("fill", "url(#sun-gradient)")
-      .attr("class", "sun-corona-outer")
+      .attr("class", "sun-corona-outer sun-scalable")
       .attr("pointer-events", "none");
 
     cG.filter(d => d.isUserCompany).append("circle")
       .attr("r", d => getCompanyRadius(d) * 4)
+      .attr("data-base-r", d => getCompanyRadius(d) * 4)
       .attr("fill", "url(#sun-gradient)")
-      .attr("class", "sun-corona")
+      .attr("class", "sun-corona sun-scalable")
       .attr("pointer-events", "none");
 
     // Ring accents
     cG.filter(d => d.isUserCompany).append("circle")
       .attr("r", d => getCompanyRadius(d) * 5)
+      .attr("data-base-r", d => getCompanyRadius(d) * 5)
       .attr("fill", "none")
       .attr("stroke", ucColor + "15")
       .attr("stroke-width", 1)
       .attr("stroke-dasharray", "3,6")
-      .attr("class", "sun-corona")
+      .attr("class", "sun-corona sun-scalable")
       .attr("pointer-events", "none");
 
     cG.filter(d => d.isUserCompany).append("circle")
       .attr("r", d => getCompanyRadius(d) * 3)
+      .attr("data-base-r", d => getCompanyRadius(d) * 3)
       .attr("fill", "none")
       .attr("stroke", ucColor + "20")
       .attr("stroke-width", 0.8)
-      .attr("class", "sun-corona")
+      .attr("class", "sun-corona sun-scalable")
+      .attr("pointer-events", "none");
+
+    // Animated orbit rings for user's company (sun)
+    cG.filter(d => d.isUserCompany).append("circle")
+      .attr("r", d => getCompanyRadius(d) * 1.5)
+      .attr("data-base-r", d => getCompanyRadius(d) * 1.5)
+      .attr("fill", "none")
+      .attr("stroke", ucColor)
+      .attr("stroke-width", 1.2)
+      .attr("stroke-dasharray", "4,10")
+      .attr("opacity", 0.4)
+      .attr("class", "sun-orbit-1 sun-corona sun-scalable")
+      .attr("pointer-events", "none");
+
+    cG.filter(d => d.isUserCompany).append("circle")
+      .attr("r", d => getCompanyRadius(d) * 2.2)
+      .attr("data-base-r", d => getCompanyRadius(d) * 2.2)
+      .attr("fill", "none")
+      .attr("stroke", ucColor)
+      .attr("stroke-width", 0.8)
+      .attr("stroke-dasharray", "6,14")
+      .attr("opacity", 0.25)
+      .attr("class", "sun-orbit-2 sun-corona sun-scalable")
+      .attr("pointer-events", "none");
+
+    // Black hole effects for "Unbekannt" company
+    const bhFilter = d => d.name === "Unbekannt";
+
+    // Gravitational lensing glow (outermost)
+    cG.filter(bhFilter).append("circle")
+      .attr("r", d => getCompanyRadius(d) * 3)
+      .attr("fill", "url(#bh-gradient)")
+      .attr("pointer-events", "none");
+
+    // Accretion disk — tilted ellipse
+    cG.filter(bhFilter).append("ellipse")
+      .attr("rx", d => getCompanyRadius(d) * 2)
+      .attr("ry", d => getCompanyRadius(d) * 0.5)
+      .attr("transform", "rotate(-20)")
+      .attr("fill", "none")
+      .attr("stroke", "url(#bh-disk-grad)")
+      .attr("stroke-width", d => Math.max(2, getCompanyRadius(d) * 0.15))
+      .attr("opacity", 0.5)
+      .attr("filter", "url(#bh-glow)")
+      .attr("pointer-events", "none");
+
+    // Spinning ring particles
+    cG.filter(bhFilter).append("circle")
+      .attr("r", d => getCompanyRadius(d) * 1.6)
+      .attr("fill", "none")
+      .attr("stroke", "#A855F7")
+      .attr("stroke-width", 0.8)
+      .attr("stroke-dasharray", "2,8")
+      .attr("opacity", 0.4)
+      .attr("class", "bh-ring")
+      .attr("pointer-events", "none");
+
+    // Photon sphere — bright thin ring at event horizon edge
+    cG.filter(bhFilter).append("circle")
+      .attr("r", d => getCompanyRadius(d) * 1.08)
+      .attr("fill", "none")
+      .attr("stroke", "#C084FC")
+      .attr("stroke-width", 1.5)
+      .attr("opacity", 0.6)
+      .attr("filter", "url(#bh-glow)")
       .attr("pointer-events", "none");
 
     // Main bubble
     cG.append("circle")
       .attr("r", getCompanyRadius)
-      .attr("fill", d => d.isUserCompany
-        ? `${ucColor}30`
-        : (companyColors[d.id] || P.accent) + "10")
-      .attr("stroke", d => d.isUserCompany
-        ? ucColor
-        : (companyColors[d.id] || P.accent) + "40")
-      .attr("stroke-width", d => d.isUserCompany ? 2.5 : 1.5)
+      .attr("fill", d => {
+        if (d.isUserCompany) return `${ucColor}30`;
+        if (d.name === "Unbekannt") return "#030006";
+        return (companyColors[d.id] || P.accent) + "30";
+      })
+      .attr("stroke", d => {
+        if (d.isUserCompany) return ucColor;
+        if (d.name === "Unbekannt") return "#7C3AED40";
+        return (companyColors[d.id] || P.accent) + "55";
+      })
+      .attr("stroke-width", d => d.isUserCompany ? 2.5 : d.name === "Unbekannt" ? 2 : 1.5)
       .attr("filter", d => d.isUserCompany ? "url(#sun-glow)" : "none")
-      .attr("class", d => d.isUserCompany ? "sun-glow-bubble" : "company-bubble");
+      .attr("class", d => d.isUserCompany ? "sun-glow-bubble sun-pulse" : "company-bubble");
+
 
     const formatSize = (n) => {
       if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -657,12 +815,17 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     cG.append("text")
       .attr("class", "company-text")
       .text(d => {
+        if (d.name === "Unbekannt") return "?";
         const radius = getCompanyRadius(d);
         const maxLen = d.isUserCompany ? 25 : Math.max(8, Math.min(18, Math.floor(radius / 4)));
         return d.name.length > maxLen ? d.name.slice(0, maxLen - 1) + "…" : d.name;
       })
-      .attr("text-anchor", "middle").attr("dy", "-0.3em")
-      .attr("fill", d => d.isUserCompany ? ucColor : (companyColors[d.id] || P.accent))
+      .attr("text-anchor", "middle").attr("dy", d => d.name === "Unbekannt" ? "-0.6em" : "-0.3em")
+      .attr("fill", d => {
+        if (d.isUserCompany) return ucColor;
+        if (d.name === "Unbekannt") return "#A855F7";
+        return companyColors[d.id] || P.accent;
+      })
       .attr("font-size", d => {
         if (d.isUserCompany) return 14;
         const sizeScale = Math.log10(Math.max(d.estimatedSize || 100, 10));
@@ -673,7 +836,7 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       .attr("display", companyTextDisplay);
 
     cG.append("text")
-      .attr("class", "company-text")
+      .attr("class", "company-text company-detail-text")
       .text(d => d.name === "Unbekannt" ? "" : formatSize(d.estimatedSize || 0))
       .attr("text-anchor", "middle").attr("dy", "1em")
       .attr("fill", P.textMuted)
@@ -686,10 +849,18 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       .attr("display", companyTextDisplay);
 
     cG.append("text")
-      .attr("class", "company-text")
-      .text(d => d.isUserCompany ? "MEINE FIRMA" : (d.name === "Unbekannt" ? `${d.memberCount} Kontakte` : `${d.memberCount} conn.`))
+      .attr("class", "company-text company-detail-text")
+      .text(d => {
+        if (d.isUserCompany) return "MEINE FIRMA";
+        if (d.name === "Unbekannt") return `${d.memberCount} nicht zugeordnet`;
+        return `${d.memberCount} conn.`;
+      })
       .attr("text-anchor", "middle").attr("dy", "2.2em")
-      .attr("fill", d => d.isUserCompany ? ucColor + "80" : P.textDim)
+      .attr("fill", d => {
+        if (d.isUserCompany) return ucColor + "80";
+        if (d.name === "Unbekannt") return "#A855F780";
+        return P.textDim;
+      })
       .attr("font-size", d => d.isUserCompany ? 8 : 6)
       .attr("font-weight", d => d.isUserCompany ? 600 : 500)
       .attr("letter-spacing", d => d.isUserCompany ? "1px" : "0")
@@ -790,6 +961,33 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
     let tickCount = 0;
 
+    // Cache company radii — they never change after init
+    const radiusCache = new Map();
+    const getCachedRadius = (node) => {
+      let r = radiusCache.get(node.id);
+      if (r === undefined) {
+        r = getCompanyRadius(node) + 4;
+        radiusCache.set(node.id, r);
+      }
+      return r;
+    };
+
+    // Pre-build indexed DOM arrays for O(1) access in tick (instead of .filter per index)
+    const hitNodes = companyLinkHit.nodes();
+    const labelNodes = companyLinkLabel.nodes();
+    const labelBgNodes = companyLinkLabelBg.nodes();
+
+    // Cache label bounding box sizes (text content doesn't change, only position)
+    const labelBBoxCache = new Map();
+    const pad = 3;
+
+    // Pre-resolve source/target IDs and curve values per link
+    const linkMeta = companyLinkData.map(d => ({
+      sId: typeof d.source === "object" ? d.source.id : d.source,
+      tId: typeof d.target === "object" ? d.target.id : d.target,
+      curve: linkCurve.get(d) || 0,
+    }));
+
     sim.on("tick", () => {
       tickCount++;
       // Update contact-to-company links every 3rd tick
@@ -798,57 +996,57 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       }
 
       companyLink.each(function(d, i) {
-        const sourceNode = nodeMap.get(typeof d.source === "object" ? d.source.id : d.source);
-        const targetNode = nodeMap.get(typeof d.target === "object" ? d.target.id : d.target);
+        const meta = linkMeta[i];
+        const sourceNode = nodeMap.get(typeof d.source === "object" ? d.source.id : meta.sId);
+        const targetNode = nodeMap.get(typeof d.target === "object" ? d.target.id : meta.tId);
         if (sourceNode && targetNode) {
           const dx = targetNode.x - sourceNode.x;
           const dy = targetNode.y - sourceNode.y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
           const ux = dx / dist, uy = dy / dist;
-          const sr = getCompanyRadius(sourceNode) + 4;
-          const tr = getCompanyRadius(targetNode) + 4;
+          const sr = getCachedRadius(sourceNode);
+          const tr = getCachedRadius(targetNode);
           const x1 = sourceNode.x + ux * sr;
           const y1 = sourceNode.y + uy * sr;
           const x2 = targetNode.x - ux * tr;
           const y2 = targetNode.y - uy * tr;
-          const curve = linkCurve.get(d) || 0;
           let pathD, labelX, labelY;
-          if (curve === 0) {
+          if (meta.curve === 0) {
             pathD = `M${x1},${y1}L${x2},${y2}`;
             labelX = (x1 + x2) / 2;
             labelY = (y1 + y2) / 2;
           } else {
-            const sId = typeof d.source === "object" ? d.source.id : d.source;
-            const tId = typeof d.target === "object" ? d.target.id : d.target;
-            const flip = sId > tId ? -1 : 1;
+            const flip = meta.sId > meta.tId ? -1 : 1;
             const mx = (x1 + x2) / 2;
             const my = (y1 + y2) / 2;
-            const cpx = mx + (-uy) * dist * curve * flip;
-            const cpy = my + ux * dist * curve * flip;
+            const cpx = mx + (-uy) * dist * meta.curve * flip;
+            const cpy = my + ux * dist * meta.curve * flip;
             pathD = `M${x1},${y1}Q${cpx},${cpy} ${x2},${y2}`;
-            // Bezier midpoint at t=0.5: B(0.5) = 0.25*P0 + 0.5*CP + 0.25*P2
             labelX = 0.25 * x1 + 0.5 * cpx + 0.25 * x2;
             labelY = 0.25 * y1 + 0.5 * cpy + 0.25 * y2;
           }
-          d3.select(this).attr("d", pathD);
-          // Update hit area path
-          companyLinkHit.filter((_, idx) => idx === i).attr("d", pathD);
-          // Offset label slightly perpendicular to the line so it doesn't overlap
-          const perpX = -uy * 8;
-          const perpY = ux * 8;
-          const lx = labelX + perpX;
-          const ly = labelY + perpY;
-          // Update label text position
-          companyLinkLabel.filter((_, idx) => idx === i).attr("x", lx).attr("y", ly);
-          // Update background rect — measure text bounding box
-          const textNode = companyLinkLabel.filter((_, idx) => idx === i).node();
-          if (textNode) {
-            const bbox = textNode.getBBox();
-            const pad = 3;
-            companyLinkLabelBg.filter((_, idx) => idx === i)
-              .attr("x", bbox.x - pad).attr("y", bbox.y - pad)
-              .attr("width", bbox.width + pad * 2).attr("height", bbox.height + pad * 2);
+          this.setAttribute("d", pathD);
+          // Update hit area path (direct DOM, no filter scan)
+          hitNodes[i].setAttribute("d", pathD);
+          // Offset label slightly perpendicular to the line
+          const lx = labelX - uy * 8;
+          const ly = labelY + ux * 8;
+          // Update label text position (direct DOM)
+          const labelEl = labelNodes[i];
+          labelEl.setAttribute("x", lx);
+          labelEl.setAttribute("y", ly);
+          // Update background rect using cached bbox dimensions
+          let cached = labelBBoxCache.get(i);
+          if (!cached) {
+            const bbox = labelEl.getBBox();
+            cached = { w: bbox.width + pad * 2, h: bbox.height + pad * 2, dx: bbox.width / 2 + pad, dy: bbox.height / 2 + pad };
+            labelBBoxCache.set(i, cached);
           }
+          const bgEl = labelBgNodes[i];
+          bgEl.setAttribute("x", lx - cached.dx);
+          bgEl.setAttribute("y", ly - cached.dy);
+          bgEl.setAttribute("width", cached.w);
+          bgEl.setAttribute("height", cached.h);
         }
       });
 
@@ -941,20 +1139,21 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
     const cG = companyGroupsRef.current;
     const cLinks = companyLinksRef.current;
 
-    // Remove any previous highlight labels
+    // Remove any previous highlight labels and selected orbits
     g.selectAll(".big-player-label").remove();
     g.selectAll(".big-player-ring").remove();
+    g.selectAll(".selected-orbit").remove();
 
     if (!selectedCompany) {
       // Reset all contact dots and company bubbles to normal
-      cN.attr("opacity", 0.85);
+      cN.attr("display", null).attr("opacity", 0.85);
       if (cG) cG.transition().duration(300).attr("opacity", 1);
-      if (cLinks) cLinks.transition().duration(300).attr("opacity", 1);
+      if (cLinks) cLinks.attr("display", null).transition().duration(300).attr("opacity", 1);
       // Restore label opacity
       const cLabel = companyLinkLabelRef.current;
       const cLabelBg = companyLinkLabelBgRef.current;
-      if (cLabel) cLabel.transition().duration(300).attr("opacity", 1);
-      if (cLabelBg) cLabelBg.transition().duration(300).attr("opacity", 1);
+      if (cLabel) cLabel.attr("display", null).transition().duration(300).attr("opacity", 1);
+      if (cLabelBg) cLabelBg.attr("display", null).transition().duration(300).attr("opacity", 1);
       // Restore zoom/toggle-based visibility
       const contactGrp = contactGroupRef.current;
       if (contactGrp) {
@@ -1007,23 +1206,27 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       return sId === selectedId || tId === selectedId;
     };
     if (cLinks) {
-      cLinks.transition().duration(300)
+      cLinks.attr("display", d => isConnectedLink(d) ? null : "none")
+        .transition().duration(300)
         .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
     }
     const cLabel = companyLinkLabelRef.current;
     const cLabelBg = companyLinkLabelBgRef.current;
     if (cLabel) {
-      cLabel.transition().duration(300)
+      cLabel.attr("display", d => isConnectedLink(d) ? null : "none")
+        .transition().duration(300)
         .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
     }
     if (cLabelBg) {
-      cLabelBg.transition().duration(300)
+      cLabelBg.attr("display", d => isConnectedLink(d) ? null : "none")
+        .transition().duration(300)
         .attr("opacity", d => isConnectedLink(d) ? 1 : 0.07);
     }
 
-    // Force company text visible for selected + connected companies
+    // Show company names for all; hide size/count detail text on non-connected companies
     if (cG) {
-      cG.selectAll(".company-text").attr("display", function() {
+      cG.selectAll(".company-text").attr("display", null);
+      cG.selectAll(".company-detail-text").attr("display", function() {
         const d = d3.select(this.parentNode).datum();
         return d.isUserCompany || connectedIds.has(d.id) ? null : "none";
       });
@@ -1054,8 +1257,9 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
       });
     }
 
-    // Dim contacts: show selected + connected companies' contacts
-    cN.attr("opacity", d => connectedNames.has(d.company) ? 1 : 0.08);
+    // Hide contacts of unconnected companies for performance; show connected ones
+    cN.attr("display", d => connectedNames.has(d.company) ? null : "none")
+      .attr("opacity", d => connectedNames.has(d.company) ? 1 : 0.08);
 
     // Find big players: top contacts by seniority/influence in the selected company
     const companyContacts = nodesRef.current.filter(
@@ -1110,6 +1314,40 @@ export const NetworkGraph = forwardRef(function NetworkGraph({
           .text(p.position.length > 22 ? p.position.slice(0, 21) + "…" : p.position);
       }
     });
+
+    // Add animated orbit rings to the selected company (scaled by bubble size)
+    if (cG) {
+      const selGroup = cG.filter(d => d.id === selectedId);
+      if (!selGroup.empty()) {
+        const selData = selGroup.datum();
+        const selColor = companyColors[`company_${companyName}`] || P.accent;
+        const radiusFn = getCompanyRadiusRef.current;
+        const selR = selData && radiusFn ? radiusFn(selData) : 20;
+
+        if (!selData?.isUserCompany) {
+          const s = selR / 25; // scale factor relative to a ~25px "medium" bubble
+          selGroup.append("circle")
+            .attr("r", selR * 1.5)
+            .attr("fill", "none")
+            .attr("stroke", selColor)
+            .attr("stroke-width", Math.max(0.8, 1.2 * s))
+            .attr("stroke-dasharray", `${4 * s},${10 * s}`)
+            .attr("opacity", 0.4)
+            .attr("class", "selected-orbit-1 selected-orbit")
+            .attr("pointer-events", "none");
+
+          selGroup.append("circle")
+            .attr("r", selR * 2.2)
+            .attr("fill", "none")
+            .attr("stroke", selColor)
+            .attr("stroke-width", Math.max(0.5, 0.8 * s))
+            .attr("stroke-dasharray", `${6 * s},${14 * s}`)
+            .attr("opacity", 0.25)
+            .attr("class", "selected-orbit-2 selected-orbit")
+            .attr("pointer-events", "none");
+        }
+      }
+    }
 
     // Update label positions on simulation tick
     const tickHandler = () => {

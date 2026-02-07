@@ -399,10 +399,16 @@ export default function App() {
   const handleScreenshot = () => {
     const svgEl = graphRef.current?.getSvgElement();
     if (!svgEl) return;
+    const w = svgEl.clientWidth;
+    const h = svgEl.clientHeight;
     const clone = svgEl.cloneNode(true);
+    // Fix dimensions to match actual rendered size (CSS 100% won't resolve outside DOM)
+    clone.removeAttribute("style");
+    clone.setAttribute("width", w);
+    clone.setAttribute("height", h);
     const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    bgRect.setAttribute("width", "100%");
-    bgRect.setAttribute("height", "100%");
+    bgRect.setAttribute("width", String(w));
+    bgRect.setAttribute("height", String(h));
     bgRect.setAttribute("fill", P.bg);
     clone.insertBefore(bgRect, clone.firstChild);
     const serializer = new XMLSerializer();
@@ -411,8 +417,6 @@ export default function App() {
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
     img.onload = () => {
-      const w = svgEl.clientWidth;
-      const h = svgEl.clientHeight;
       const canvas = document.createElement("canvas");
       canvas.width = w * 2;
       canvas.height = h * 2;
