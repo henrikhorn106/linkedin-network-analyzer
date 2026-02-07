@@ -101,7 +101,7 @@ export function calculateSeniority(position) {
  * @param {string} industryFilter - Industry to filter by ("all" = no filter)
  * @param {Array} companyRelationships - Company-to-company relationships [{source, target, type}]
  */
-export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = [], companyEnrichments = {}) {
+export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, industryFilter = "all", companyRelationships = [], companyEnrichments = {}, focusCompanyNames = null) {
   // Group contacts by company (case-insensitive, preserving first-seen casing)
   const companyMap = {};
   const companyCanonical = {}; // lowercase -> first-seen casing
@@ -114,11 +114,12 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
     companyMap[co].push(c);
   });
 
-  // Filter by minimum company size, but always include user's company
+  // Filter by minimum company size, but always include user's company and focused companies
   const filteredCompanyMap = {};
   Object.entries(companyMap).forEach(([name, members]) => {
     const isUserCompany = userCompany && name.trim().toLowerCase() === userCompany.trim().toLowerCase();
-    if ((members.length >= minCompanySize || isUserCompany) && name !== "Unknown") {
+    const isFocused = focusCompanyNames && focusCompanyNames.has(name.trim().toLowerCase());
+    if ((members.length >= minCompanySize || isUserCompany || isFocused) && name !== "Unknown") {
       filteredCompanyMap[name] = members;
     }
   });
@@ -149,8 +150,8 @@ export function buildNetwork(contacts, minCompanySize = 1, userCompany = null, i
         industry,
       };
     })
-    // Filter by industry (always keep user's company)
-    .filter(c => c.isUserCompany || industryFilter === "all" || c.industry === industryFilter)
+    // Filter by industry (always keep user's company and focused companies)
+    .filter(c => c.isUserCompany || industryFilter === "all" || c.industry === industryFilter || (focusCompanyNames && focusCompanyNames.has(c.name.trim().toLowerCase())))
     // Sort so user's company comes first
     .sort((a, b) => (b.isUserCompany ? 1 : 0) - (a.isUserCompany ? 1 : 0));
 

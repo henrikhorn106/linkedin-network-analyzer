@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ProfileSetup } from './ProfileSetup';
 import { CompanySetup } from './CompanySetup';
 import { execute, lastInsertRowId } from '../../db/database';
+import { hashPassword } from '../../utils/crypto';
 
 export function OnboardingFlow({ onComplete }) {
   const [step, setStep] = useState(1);
@@ -24,10 +25,11 @@ export function OnboardingFlow({ onComplete }) {
     setError(null);
 
     try {
-      // Step 1: Create user
+      // Step 1: Create user with password
+      const { hash, salt } = await hashPassword(profileData.password);
       await execute(
-        'INSERT INTO users (name, email, role) VALUES (?, ?, ?)',
-        [profileData.name, profileData.email || null, profileData.role || null]
+        'INSERT INTO users (name, email, role, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)',
+        [profileData.name, profileData.email || null, profileData.role || null, hash, salt]
       );
       const userId = lastInsertRowId('users');
 

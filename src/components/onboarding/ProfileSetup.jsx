@@ -5,15 +5,29 @@ export function ProfileSetup({ onComplete }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
 
+    setPasswordError("");
+    if (password.length < 4) {
+      setPasswordError("Mindestens 4 Zeichen");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError("Passwörter stimmen nicht überein");
+      return;
+    }
+
     onComplete({
       name: name.trim(),
       email: email.trim() || null,
       role: role.trim() || null,
+      password,
     });
   };
 
@@ -102,7 +116,7 @@ export function ProfileSetup({ onComplete }) {
             />
           </div>
 
-          <div style={{ marginBottom: 24 }}>
+          <div style={{ marginBottom: 16 }}>
             <label style={{
               display: "block", fontSize: 10, color: P.textDim,
               marginBottom: 6, letterSpacing: "0.5px"
@@ -121,6 +135,55 @@ export function ProfileSetup({ onComplete }) {
                 outline: "none", boxSizing: "border-box",
               }}
             />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{
+              display: "block", fontSize: 10, color: P.textDim,
+              marginBottom: 6, letterSpacing: "0.5px"
+            }}>
+              PASSWORT *
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setPasswordError(""); }}
+              placeholder="Mindestens 4 Zeichen"
+              required
+              style={{
+                width: "100%", padding: "10px 12px", background: P.bg,
+                border: `1px solid ${passwordError ? P.red : P.border}`, borderRadius: 6,
+                color: P.text, fontSize: 12, fontFamily: "inherit",
+                outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{
+              display: "block", fontSize: 10, color: P.textDim,
+              marginBottom: 6, letterSpacing: "0.5px"
+            }}>
+              PASSWORT BESTÄTIGEN *
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={e => { setConfirmPassword(e.target.value); setPasswordError(""); }}
+              placeholder="Passwort wiederholen"
+              required
+              style={{
+                width: "100%", padding: "10px 12px", background: P.bg,
+                border: `1px solid ${passwordError ? P.red : P.border}`, borderRadius: 6,
+                color: P.text, fontSize: 12, fontFamily: "inherit",
+                outline: "none", boxSizing: "border-box",
+              }}
+            />
+            {passwordError && (
+              <div style={{ fontSize: 10, color: P.red, marginTop: 6 }}>
+                {passwordError}
+              </div>
+            )}
           </div>
 
           <button

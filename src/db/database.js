@@ -95,6 +95,14 @@ export async function initDatabase() {
     } catch (e) {
       console.warn('[DB Repair] Skipped:', e.message);
     }
+    // Migration: add password columns to users if missing
+    try {
+      db.exec('SELECT password_hash FROM users LIMIT 0');
+    } catch (e) {
+      db.run('ALTER TABLE users ADD COLUMN password_hash TEXT');
+      db.run('ALTER TABLE users ADD COLUMN password_salt TEXT');
+      await persistDatabase();
+    }
     // Migration: add linkedin_url column if missing
     try {
       db.exec('SELECT linkedin_url FROM contacts LIMIT 0');
@@ -244,4 +252,10 @@ export async function clearDatabase() {
 export function hasUser() {
   const result = query('SELECT COUNT(*) as count FROM users');
   return result[0]?.count > 0;
+}
+
+// Get the first user record (for login)
+export function getUser() {
+  const result = query('SELECT * FROM users LIMIT 1');
+  return result[0] || null;
 }

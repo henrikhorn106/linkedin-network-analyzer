@@ -191,7 +191,7 @@ export function Sidebar({
 
   if (selectedCompany) {
     return (
-      <div style={{ width: 280, borderLeft: `1px solid ${P.border}`, background: P.surface, overflowY: "auto", flexShrink: 0 }}>
+      <div style={{ width: 280, height: "100%", borderLeft: `1px solid ${P.border}`, background: P.surface, overflowY: "auto", flexShrink: 0 }}>
         <div style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <button
@@ -777,7 +777,7 @@ export function Sidebar({
             );
 
             return (
-              <div style={{ marginTop: 14, maxHeight: 350, overflowY: "auto" }}>
+              <div style={{ marginTop: 14 }}>
                 {keyPlayers.length > 0 && (
                   <>
                     <div style={{
@@ -841,7 +841,7 @@ export function Sidebar({
 
   // Default view: Influencers and Companies
   return (
-    <div style={{ width: 280, borderLeft: `1px solid ${P.border}`, background: P.surface, overflowY: "auto", flexShrink: 0 }}>
+    <div style={{ width: 280, height: "100%", borderLeft: `1px solid ${P.border}`, background: P.surface, overflowY: "auto", flexShrink: 0 }}>
       <div style={{ padding: 16 }}>
         {/* Top Influencers */}
         <div style={{ fontSize: 9, color: P.textDim, letterSpacing: "1.5px", marginBottom: 12 }}>

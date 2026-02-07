@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { initDatabase, hasUser, persistDatabase, query } from '../db/database';
+import { initDatabase, hasUser, getUser, persistDatabase, query, execute } from '../db/database';
+import { hashPassword, verifyPassword } from '../utils/crypto';
 
 const DatabaseContext = createContext(null);
 
@@ -8,6 +9,8 @@ export function DatabaseProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Initialize database on mount
   useEffect(() => {
@@ -18,8 +21,14 @@ export function DatabaseProvider({ children }) {
         await initDatabase();
         if (mounted) {
           const userExists = hasUser();
-
-
+          if (userExists) {
+            const user = getUser();
+            setCurrentUser(user);
+            // If user has no password set (legacy), auto-authenticate
+            if (!user.password_hash) {
+              setIsAuthenticated(true);
+            }
+          }
           setNeedsOnboarding(!userExists);
           setIsInitialized(true);
           setIsLoading(false);
@@ -40,14 +49,47 @@ export function DatabaseProvider({ children }) {
     };
   }, []);
 
-  // Mark onboarding as complete
+  // Mark onboarding as complete (also auto-authenticate)
   const completeOnboarding = useCallback(() => {
     setNeedsOnboarding(false);
+    setIsAuthenticated(true);
+    const user = getUser();
+    setCurrentUser(user);
   }, []);
 
   // Reset account and go back to onboarding
   const resetToOnboarding = useCallback(() => {
     setNeedsOnboarding(true);
+  }, []);
+
+  // Login with password
+  const login = useCallback(async (password) => {
+    const user = getUser();
+    if (!user || !user.password_hash) return false;
+    const valid = await verifyPassword(password, user.password_hash, user.password_salt);
+    if (valid) {
+      setIsAuthenticated(true);
+      setCurrentUser(user);
+    }
+    return valid;
+  }, []);
+
+  // Logout
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+  }, []);
+
+  // Set password for existing user without one
+  const setUserPassword = useCallback(async (password) => {
+    const user = getUser();
+    if (!user) return;
+    const { hash, salt } = await hashPassword(password);
+    await execute(
+      'UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?',
+      [hash, salt, user.id]
+    );
+    setCurrentUser({ ...user, password_hash: hash, password_salt: salt });
+    setIsAuthenticated(true);
   }, []);
 
   // Force persist database
@@ -63,6 +105,11 @@ export function DatabaseProvider({ children }) {
     completeOnboarding,
     resetToOnboarding,
     persist,
+    isAuthenticated,
+    currentUser,
+    login,
+    logout,
+    setUserPassword,
   };
 
   return (

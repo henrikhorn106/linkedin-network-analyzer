@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 
 // Styles
 import { P, CC } from "./styles/theme";
@@ -20,6 +20,8 @@ import { NetworkGraph } from "./components/NetworkGraph";
 import { Sidebar } from "./components/Sidebar";
 import { AIChatAssistant } from "./components/AIChatAssistant";
 import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
+import { LoginScreen } from "./components/LoginScreen";
+import { SetPasswordScreen } from "./components/SetPasswordScreen";
 
 // UI Components
 import { StatsCards } from "./components/ui/StatsCards";
@@ -124,7 +126,7 @@ function ErrorScreen({ error }) {
 
 export default function App() {
   // Database context
-  const { isLoading: dbLoading, error: dbError, needsOnboarding, completeOnboarding, resetToOnboarding } = useDatabase();
+  const { isLoading: dbLoading, error: dbError, needsOnboarding, completeOnboarding, resetToOnboarding, isAuthenticated, currentUser, logout } = useDatabase();
 
   // User & Company hooks
   const { user, isLoading: userLoading, deleteUser } = useUser();
@@ -153,6 +155,8 @@ export default function App() {
 
   // UI State
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const selectedCompanyRef = useRef(null);
+  selectedCompanyRef.current = selectedCompany;
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [minCompanySize, setMinCompanySize] = useState(1);
@@ -167,6 +171,7 @@ export default function App() {
   const [focusNode, setFocusNode] = useState(null);
   const [industryFilter, setIndustryFilter] = useState("all");
   const [agarFullscreen, setAgarFullscreen] = useState(false);
+  const [focusConnections, setFocusConnections] = useState(true);
 
   // Listen for agar fullscreen toggle events
   useEffect(() => {
@@ -202,10 +207,29 @@ export default function App() {
   // Get all enrichment data for companies
   const companyEnrichments = useMemo(() => getAllCompanyEnrichments(), [getAllCompanyEnrichments, contacts]);
 
+  // Compute set of company names connected to user's company (for Fokus filter)
+  // Respects the Link type filter — only protects companies connected via the selected link type
+  const focusCompanyNames = useMemo(() => {
+    if (!focusConnections || !company?.name || companyLinkFilter === "none") return null;
+    const userCompanyId = `company_${company.name}`;
+    const names = new Set();
+    companyRelationships.forEach(rel => {
+      // Skip if link type doesn't match the current filter
+      if (companyLinkFilter !== "all" && rel.type !== companyLinkFilter) return;
+      if (rel.source === userCompanyId) {
+        names.add(rel.target.replace(/^company_/, '').trim().toLowerCase());
+      }
+      if (rel.target === userCompanyId) {
+        names.add(rel.source.replace(/^company_/, '').trim().toLowerCase());
+      }
+    });
+    return names.size > 0 ? names : null;
+  }, [focusConnections, company?.name, companyRelationships, companyLinkFilter]);
+
   // Build network (pass user's company to always show it centered)
   const network = useMemo(() =>
-    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments),
-    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments]
+    buildNetwork(filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments, focusCompanyNames),
+    [filteredContacts, minCompanySize, company?.name, industryFilter, companyRelationships, companyEnrichments, focusCompanyNames]
   );
 
   // Top influencers
@@ -298,6 +322,13 @@ export default function App() {
     setSelectedContact(null);
   }, [dbDeleteContact]);
 
+  const handleContactClick = useCallback((contact) => {
+    setSelectedContact(contact);
+    if (contact?.id) {
+      setFocusNode({ id: contact.id, ts: Date.now() });
+    }
+  }, []);
+
   const handleCompanyClick = useCallback((company) => {
     if (linkingMode) {
       if (linkingMode.from !== company.id) {
@@ -310,8 +341,12 @@ export default function App() {
       }
       setLinkingMode(null);
     } else {
-      setSelectedCompany(prev => prev?.id === company.id ? null : company);
+      const isDeselect = selectedCompanyRef.current?.id === company.id;
+      setSelectedCompany(isDeselect ? null : company);
       setSelectedContact(null);
+      if (!isDeselect) {
+        setFocusNode({ id: company.id, ts: Date.now() });
+      }
     }
   }, [linkingMode, addRelationship]);
 
@@ -354,6 +389,16 @@ export default function App() {
     );
   }
 
+  // Existing user without password — prompt to set one
+  if (currentUser && !currentUser.password_hash && !isAuthenticated) {
+    return <SetPasswordScreen userName={currentUser.name} />;
+  }
+
+  // User exists but not authenticated — show login
+  if (!isAuthenticated) {
+    return <LoginScreen userName={currentUser?.name} />;
+  }
+
   // Render main app
   return (
     <div style={{
@@ -373,6 +418,8 @@ export default function App() {
         transform: agarFullscreen ? "translateY(-100%)" : "translateY(0)",
         transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
         marginBottom: agarFullscreen ? "-48px" : 0,
+        position: "relative",
+        zIndex: 10,
       }}>
         <TopBar
           contacts={contacts}
@@ -387,6 +434,8 @@ export default function App() {
           industryFilter={industryFilter}
           setIndustryFilter={setIndustryFilter}
           availableIndustries={network.allIndustries || []}
+          focusConnections={focusConnections}
+          setFocusConnections={setFocusConnections}
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
           searchResults={searchResults}
@@ -412,6 +461,7 @@ export default function App() {
               allCompanyLinks={filteredCompanyLinks}
               linkingMode={linkingMode}
               onCompanyClick={handleCompanyClick}
+              onContactClick={handleContactClick}
               setSelectedContact={setSelectedContact}
               userCompanyColor={company?.color || null}
               focusNode={focusNode}
@@ -430,7 +480,7 @@ export default function App() {
                 cLevelCount={topInfluencers.filter(t => t.seniority >= 8).length}
               />
 
-              {selectedContact && !selectedCompany && (
+              {selectedContact && (
                 <ContactTooltip
                   contact={selectedContact}
                   onEdit={setEditingContact}
@@ -461,6 +511,8 @@ export default function App() {
             transform: agarFullscreen ? "translateX(100%)" : "translateX(0)",
             transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), margin 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
             marginLeft: agarFullscreen ? "-280px" : 0,
+            height: "100%",
+            overflow: "hidden",
           }}>
             <Sidebar
               selectedCompany={selectedCompany}
@@ -517,6 +569,7 @@ export default function App() {
           user={user}
           company={company}
           onDeleteAccount={handleDeleteAccount}
+          onLogout={logout}
           onClose={() => setShowSettings(false)}
         />
       )}

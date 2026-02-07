@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { P } from '../../styles/theme';
 
-export function SettingsModal({ user, company, onDeleteAccount, onClose }) {
+export function SettingsModal({ user, company, onDeleteAccount, onLogout, onClose }) {
   const [confirmText, setConfirmText] = useState('');
 
   const handleDelete = () => {
@@ -57,6 +57,20 @@ export function SettingsModal({ user, company, onDeleteAccount, onClose }) {
             </div>
           )}
         </div>
+
+        {/* Logout */}
+        <button
+          onClick={() => { onLogout(); onClose(); }}
+          style={{
+            width: "100%", padding: "10px 0", marginBottom: 16,
+            background: P.bg, border: `1px solid ${P.border}`,
+            borderRadius: 7, color: P.text, fontSize: 11,
+            fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            letterSpacing: "0.5px",
+          }}
+        >
+          Abmelden
+        </button>
 
         {/* Danger zone */}
         <div style={{

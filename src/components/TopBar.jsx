@@ -16,6 +16,8 @@ export function TopBar({
   industryFilter,
   setIndustryFilter,
   availableIndustries,
+  focusConnections,
+  setFocusConnections,
   searchTerm,
   setSearchTerm,
   searchResults,
@@ -271,6 +273,8 @@ export function TopBar({
             industryFilter={industryFilter}
             setIndustryFilter={setIndustryFilter}
             availableIndustries={availableIndustries}
+            focusConnections={focusConnections}
+            setFocusConnections={setFocusConnections}
           />
         </div>
       )}

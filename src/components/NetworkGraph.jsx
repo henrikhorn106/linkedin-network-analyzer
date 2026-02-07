@@ -10,6 +10,7 @@ export function NetworkGraph({
   allCompanyLinks,
   linkingMode,
   onCompanyClick,
+  onContactClick,
   setSelectedContact,
   userCompanyColor,
   focusNode,
@@ -454,7 +455,7 @@ export function NetworkGraph({
       const uG = userBubbleRef.current = g.append("g").selectAll("g")
         .data([userNode]).join("g")
         .attr("cursor", "pointer")
-        .on("click", (_, d) => { setSelectedContact(d); })
+        .on("click", (_, d) => { onContactClick(d); })
         .call(drag);
 
       const userRadius = isLargeNetwork ? 14 : 18;
@@ -531,7 +532,7 @@ export function NetworkGraph({
           linkGroup.attr("display", "none");
         }
       })
-      .on("click", (_, d) => { setSelectedContact(d); })
+      .on("click", (_, d) => { onContactClick(d); })
       .call(drag);
     contactDotsRef.current = cN;
     _cN = cN;
@@ -598,7 +599,7 @@ export function NetworkGraph({
     }, 800);
 
     return () => sim.stop();
-  }, [network, companyColors, showCompanyLinks, allCompanyLinks, linkingMode, onCompanyClick, setSelectedContact, userCompanyColor]);
+  }, [network, companyColors, showCompanyLinks, allCompanyLinks, linkingMode, onCompanyClick, onContactClick, setSelectedContact, userCompanyColor]);
 
   // Pan/zoom to focused node
   useEffect(() => {
@@ -620,28 +621,71 @@ export function NetworkGraph({
       .call(zoomRef.current.transform, transform);
   }, [focusNode]);
 
-  // Highlight big players when a company is selected
+  // Highlight big players and connected companies when a company is selected
   useEffect(() => {
     if (!gRef.current || !contactDotsRef.current || !nodesRef.current) return;
     const g = gRef.current;
     const cN = contactDotsRef.current;
+    const cG = companyGroupsRef.current;
+    const cLinks = companyLinksRef.current;
 
     // Remove any previous highlight labels
     g.selectAll(".big-player-label").remove();
     g.selectAll(".big-player-ring").remove();
 
     if (!selectedCompany) {
-      // Reset all contact dots to normal
+      // Reset all contact dots and company bubbles to normal
       cN.attr("opacity", 0.85);
+      if (cG) cG.transition().duration(300).attr("opacity", 1);
+      if (cLinks) cLinks.transition().duration(300).attr("stroke-opacity", d => d.type === "inferred" ? 0.3 : 0.6);
       return;
     }
 
     const companyName = selectedCompany.name;
+    const selectedId = selectedCompany.id;
 
-    // Dim contacts from other companies, highlight selected company's contacts
-    cN.attr("opacity", d => d.company === companyName ? 1 : 0.15);
+    // Build set of directly connected company IDs
+    const connectedIds = new Set();
+    connectedIds.add(selectedId);
+    allCompanyLinks.forEach(l => {
+      const sId = typeof l.source === "object" ? l.source.id : l.source;
+      const tId = typeof l.target === "object" ? l.target.id : l.target;
+      if (sId === selectedId) connectedIds.add(tId);
+      if (tId === selectedId) connectedIds.add(sId);
+    });
 
-    // Find big players: top contacts by seniority/influence in this company
+    // Build set of connected company names for contact filtering
+    const connectedNames = new Set();
+    connectedNames.add(companyName);
+    if (nodesRef.current) {
+      nodesRef.current.forEach(n => {
+        if (n.type === "company" && connectedIds.has(n.id)) {
+          connectedNames.add(n.name);
+        }
+      });
+    }
+
+    // Dim companies that aren't connected; keep user's company visible
+    if (cG) {
+      cG.transition().duration(300)
+        .attr("opacity", d => d.isUserCompany || connectedIds.has(d.id) ? 1 : 0.12);
+    }
+
+    // Dim company-to-company links that don't involve the selected company
+    if (cLinks) {
+      cLinks.transition().duration(300)
+        .attr("stroke-opacity", d => {
+          const sId = typeof d.source === "object" ? d.source.id : d.source;
+          const tId = typeof d.target === "object" ? d.target.id : d.target;
+          if (sId === selectedId || tId === selectedId) return d.type === "inferred" ? 0.4 : 0.8;
+          return 0.05;
+        });
+    }
+
+    // Dim contacts: show selected + connected companies' contacts
+    cN.attr("opacity", d => connectedNames.has(d.company) ? 1 : 0.08);
+
+    // Find big players: top contacts by seniority/influence in the selected company
     const companyContacts = nodesRef.current.filter(
       n => n.type === "contact" && !n.isUser && n.company === companyName
     );
@@ -719,7 +763,7 @@ export function NetworkGraph({
         simulationRef.current.on("tick.highlight", null);
       }
     };
-  }, [selectedCompany, companyColors]);
+  }, [selectedCompany, companyColors, allCompanyLinks]);
 
   // Easter egg: double-click your company → agar.io mode
   useEffect(() => {

@@ -14,6 +14,8 @@ export function FilterControls({
   industryFilter,
   setIndustryFilter,
   availableIndustries,
+  focusConnections,
+  setFocusConnections,
 }) {
   // Count links per type for dropdown labels
   const linkCounts = {};
@@ -99,6 +101,24 @@ export function FilterControls({
           )}
         </select>
       </div>
+
+      <button
+        onClick={() => setFocusConnections(!focusConnections)}
+        style={{
+          background: focusConnections ? P.accent + "15" : "transparent",
+          border: `1px solid ${focusConnections ? P.accent + "40" : P.border}`,
+          borderRadius: 4,
+          padding: "3px 8px",
+          fontSize: 9,
+          color: focusConnections ? P.accent : P.textDim,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          whiteSpace: "nowrap",
+        }}
+        title="Bei Klick auf Firma nur verbundene Firmen anzeigen"
+      >
+        Fokus
+      </button>
 
       {totalContacts !== filteredContacts && (
         <span style={{ fontSize: 9, color: P.orange }}>
